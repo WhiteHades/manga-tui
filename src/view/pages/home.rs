@@ -7,7 +7,7 @@ use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::Stylize;
-use ratatui::text::{Line, Span, ToSpan};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, StatefulWidget, Widget};
 use ratatui_image::Resize;
 use ratatui_image::picker::Picker;
@@ -47,7 +47,6 @@ pub enum HomeActions {
     GoToRecentlyAddedMangaPage,
     SelectNextRecentlyAddedManga,
     SelectPreviousRecentlyAddedManga,
-    SupportProject,
 }
 
 pub struct Home<T>
@@ -95,11 +94,9 @@ where
             HomeActions::GoToPopularMangaPage => self.go_to_manga_page_popular(),
             HomeActions::SelectNextRecentlyAddedManga => self.carrousel_recently_added.select_next(),
             HomeActions::SelectPreviousRecentlyAddedManga => self.carrousel_recently_added.select_previous(),
-
             HomeActions::GoToRecentlyAddedMangaPage => {
                 self.go_to_manga_page_recently_added();
             },
-            HomeActions::SupportProject => self.support_project(),
         }
     }
 
@@ -385,10 +382,6 @@ where
         }
     }
 
-    fn support_project(&mut self) {
-        open::that("https://github.com/josueBarretogit/manga-tui").ok();
-    }
-
     fn render_recently_added_mangas_area(&mut self, area: Rect, buf: &mut Buffer) {
         let layout = Layout::horizontal([Constraint::Percentage(30), Constraint::Percentage(70)]);
         let [app_info_area, recently_added_mangas_area] = layout.areas(area);
@@ -423,8 +416,8 @@ where
         Widget::render(
             List::new([
                 Line::from(vec![format!("Manga-tui V{}", env!("CARGO_PKG_VERSION")).into()]),
-                Line::from(vec![format!("Using: {}", self.manga_provider.name()).into()]),
-                Line::from(vec!["Support this project ".into(), "<?>".to_span().style(*INSTRUCTIONS_STYLE)]),
+                Line::from(vec![format!("Mode: {}", self.manga_provider.name()).into()]),
+                Line::from(vec!["Offline local library".into()]),
             ]),
             layout[0],
             buf,
@@ -451,9 +444,6 @@ where
             },
             KeyCode::Enter => {
                 self.local_action_tx.send(HomeActions::GoToRecentlyAddedMangaPage).ok();
-            },
-            KeyCode::Char('?') => {
-                self.local_action_tx.send(HomeActions::SupportProject).ok();
             },
             _ => {},
         }
