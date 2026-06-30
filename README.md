@@ -40,7 +40,7 @@
 
 ## Features
 
-- [Mangadex](https://mangadex.org/), [Weebcentral](https://weebcentral.com/) and [MangaPill](https://mangapill.com) are available as manga providers (many more willl be added!)
+- [Mangadex](https://mangadex.org/), [Weebcentral](https://weebcentral.com/), [MangaPill](https://mangapill.com), and local manga folders/CBZ/CBR are available as manga providers (many more willl be added!)
 so if any one goes down you can still use manga-tui
 
 - Track your reading history with [anilist integration](./docs/anilist.md)
@@ -135,6 +135,8 @@ For more information see: [image-support](https://github.com/benjajaja/ratatui-i
 
 No images will be displayed if the terminal does not have image support  (but `manga-tui` will still work as a manga downloader)
 
+Portrait pages are centered in the reader, and landscape pages automatically get a wider reading area while keeping the page list and status panel stable.
+
 ## Usage
 
 After installation just run the binary
@@ -142,6 +144,36 @@ After installation just run the binary
 ```shell
 manga-tui
 ```
+
+### Local manga
+
+Local manga is opened with `--local <path>` and has priority over the configured online provider.
+
+```shell
+manga-tui --local ~/Manga
+manga-tui --local ~/Manga/Series
+manga-tui --local ~/Manga/one-shot.cbz
+manga-tui --local ~/Manga/volume.cbr
+```
+
+Supported layouts:
+
+- A folder of images, a single CBZ, or a single CBR is treated as one manga with one chapter.
+- A folder of chapter folders or chapter archives is treated as one manga.
+- A folder of manga folders is treated as a local library.
+- `cover.jpg`, `cover.png`, `cover.webp`, and other supported image extensions are used as manga covers when present; otherwise the first page is used.
+
+### Key bindings
+
+| Area | Keys |
+| --- | --- |
+| App navigation | `gh` home, `gs` search, `gf` feed, `q` quit |
+| Lists | `j`/`k` move down/up, `Enter`/`l` open |
+| Search bars | `/` focus, `Enter` search, `Esc` stop typing |
+| Pagination | `Ctrl-d` next page, `Ctrl-u` previous page |
+| Manga page | `L` languages, `B` read bookmarked chapter, `m` bookmark, `d` download chapter, `a` download all |
+| Reader | `j`/`l` next page, `k`/`h` previous page, `n` next chapter, `N` previous chapter, `q`/`Backspace` exit |
+| Confirm dialogs | `y` confirm, `n`/`q`/`Esc` cancel |
 
 ## Manga providers
 
@@ -159,6 +191,8 @@ If you want to use Weebcentral or any other provider available then run:
 ```shell
 manga-tui -p weebcentral
 ```
+
+For local manga, use `--local <path>` instead of `-p local` because the local provider needs a filesystem path.
 
 ## Configuration
 
