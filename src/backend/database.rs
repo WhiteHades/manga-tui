@@ -151,6 +151,17 @@ pub struct MangaHistoryResponse {
     pub total_items: u32,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ReadingStats {
+    pub reading_manga_count: u32,
+    pub plan_to_read_count: u32,
+    pub read_chapter_count: u32,
+    pub downloaded_chapter_count: u32,
+    pub bookmarked_chapter_count: u32,
+    pub total_read_seconds: u64,
+    pub last_read_at: Option<String>,
+}
+
 /// Arguments for retrieving manga history with filtering and pagination.
 ///
 /// Used with `Database::get_history()` to specify exactly what manga to retrieve.
@@ -280,7 +291,8 @@ impl<'a> Database<'a> {
                 last_read  DATETIME DEFAULT (datetime('now')),
                 deleted_at  DATETIME NULL,
                 img_url TEXT NULL,
-                manga_provider TEXT NOT NULL DEFAULT local
+                manga_provider TEXT NOT NULL DEFAULT local,
+                read_seconds INTEGER NOT NULL DEFAULT 0
              )",
             (),
         )?;
@@ -295,8 +307,9 @@ impl<'a> Database<'a> {
                 is_bookmarked BOOLEAN NOT NULL DEFAULT false,
                 translated_language TEXT NULL,
                 number_page_bookmarked INT NULL,
+                read_seconds INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (manga_id) REFERENCES mangas (id)
-            )",
+             )",
             (),
         )?;
 
@@ -392,6 +405,23 @@ impl<'a> Database<'a> {
 
         self.connection
             .execute("INSERT INTO chapters(id, title, manga_id, is_read, translated_language, number_page_bookmarked, is_downloaded, is_bookmarked) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", params![chap.id, chap.title, chap.manga_id, chap.is_read, chap.translated_language, chap.number_page_bookmarked, chap.is_downloaded, chap.is_bookmarked])?;
+
+        Ok(())
+    }
+
+    pub fn record_reading_time(&self, manga_id: &str, chapter_id: &str, read_seconds: u64) -> rusqlite::Result<()> {
+        if read_seconds == 0 {
+            return Ok(());
+        }
+
+        self.connection
+            .execute("UPDATE mangas SET read_seconds = read_seconds + ?1, last_read = ?2 WHERE id = ?3", params![
+                read_seconds,
+                Utc::now().naive_utc().to_string(),
+                manga_id
+            ])?;
+        self.connection
+            .execute("UPDATE chapters SET read_seconds = read_seconds + ?1 WHERE id = ?2", params![read_seconds, chapter_id])?;
 
         Ok(())
     }
@@ -956,6 +986,48 @@ impl<'a> Database<'a> {
 
         Ok(())
     }
+
+    pub fn get_reading_stats(&self, provider: MangaProviders) -> rusqlite::Result<ReadingStats> {
+        let reading_history_id = self.get_history_type(MangaHistoryType::ReadingHistory)?;
+        let plan_to_read_id = self.get_history_type(MangaHistoryType::PlanToRead)?;
+
+        let reading_manga_count = self.get_total_mangas_in_history(reading_history_id, provider)?;
+        let plan_to_read_count = self.get_total_mangas_in_history(plan_to_read_id, provider)?;
+
+        let (read_chapter_count, downloaded_chapter_count, bookmarked_chapter_count) = self.connection.query_row(
+            "
+            SELECT
+                COALESCE(SUM(CASE WHEN chapters.is_read THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN chapters.is_downloaded THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN chapters.is_bookmarked THEN 1 ELSE 0 END), 0)
+            FROM mangas
+            LEFT JOIN chapters ON chapters.manga_id = mangas.id
+            WHERE mangas.manga_provider = ?1
+            ",
+            params![provider.to_string()],
+            |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, u32>(2)?)),
+        )?;
+
+        let (total_read_seconds, last_read_at) = self.connection.query_row(
+            "
+            SELECT COALESCE(SUM(read_seconds), 0), MAX(last_read)
+            FROM mangas
+            WHERE manga_provider = ?1
+            ",
+            params![provider.to_string()],
+            |row| Ok((row.get::<_, u64>(0)?, row.get::<_, Option<String>>(1)?)),
+        )?;
+
+        Ok(ReadingStats {
+            reading_manga_count,
+            plan_to_read_count,
+            read_chapter_count,
+            downloaded_chapter_count,
+            bookmarked_chapter_count,
+            total_read_seconds,
+            last_read_at,
+        })
+    }
 }
 
 #[derive(Default, Debug, Clone)]
@@ -1210,6 +1282,35 @@ mod test {
         database.setup().expect("could not setup the database");
 
         check_tables_exist(&connection)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn records_and_reads_aggregate_reading_stats() -> Result<()> {
+        let connection = Connection::open_in_memory()?;
+        let database = Database::new(&connection);
+        database.setup()?;
+
+        database.save_history(MangaReadingHistorySave {
+            id: "manga-1",
+            title: "Manga One",
+            img_url: None,
+            chapter: ChapterToSaveHistory {
+                id: "chapter-1",
+                title: "Chapter One",
+                translated_language: "en",
+            },
+            provider: MangaProviders::Local,
+        })?;
+        database.record_reading_time("manga-1", "chapter-1", 125)?;
+
+        let stats = database.get_reading_stats(MangaProviders::Local)?;
+
+        assert_eq!(1, stats.reading_manga_count);
+        assert_eq!(1, stats.read_chapter_count);
+        assert_eq!(125, stats.total_read_seconds);
+        assert!(stats.last_read_at.is_some());
 
         Ok(())
     }
