@@ -28,7 +28,7 @@ manga-tui
 By default the app opens:
 
 ```text
-/home/user/Videos/mangas
+~/Videos/mangas
 ```
 
 Override the library path with either:
@@ -128,5 +128,5 @@ Useful verification commands:
 cargo fmt
 cargo check
 cargo test --all-targets
-MANGA_TUI_TEST_LIBRARY_DIR=/home/user/Videos/mangas cargo test scans_configured_local_library -- --ignored --nocapture
+MANGA_TUI_TEST_LIBRARY_DIR=~/Videos/mangas cargo test scans_configured_local_library -- --ignored --nocapture
 ```

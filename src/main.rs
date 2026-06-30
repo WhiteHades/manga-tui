@@ -12,6 +12,7 @@ use backend::tracker::DisabledTracker;
 use clap::Parser;
 use crossterm::ExecutableCommand;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use directories::UserDirs;
 use log::LevelFilter;
 use logger::{ILogger, Logger};
 
@@ -30,14 +31,18 @@ mod logger;
 mod utils;
 mod view;
 
-const DEFAULT_LOCAL_LIBRARY_PATH: &str = "/home/user/Videos/mangas";
+const DEFAULT_LOCAL_LIBRARY_RELATIVE_PATH: &str = "Videos/mangas";
 
 fn local_library_path(cli_args: &CliArgs) -> PathBuf {
     cli_args
         .local
         .clone()
         .or_else(|| std::env::var_os("MANGA_TUI_LIBRARY_DIR").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCAL_LIBRARY_PATH))
+        .unwrap_or_else(|| {
+            UserDirs::new()
+                .map(|dirs| dirs.home_dir().join(DEFAULT_LOCAL_LIBRARY_RELATIVE_PATH))
+                .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCAL_LIBRARY_RELATIVE_PATH))
+        })
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 7)]
