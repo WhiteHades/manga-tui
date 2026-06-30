@@ -6,7 +6,7 @@ use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
 use manga_tui::SearchTerm;
@@ -165,16 +165,27 @@ struct LocalManga {
 
 #[derive(Clone, Debug)]
 pub struct LocalProvider {
+    library: Arc<RwLock<LocalLibrary>>,
+}
+
+#[derive(Clone, Debug)]
+struct LocalLibrary {
     library_path: PathBuf,
-    mangas: Arc<Vec<LocalManga>>,
-    manga_index: Arc<HashMap<String, usize>>,
-    page_sources: Arc<HashMap<String, LocalPageSource>>,
+    mangas: Vec<LocalManga>,
+    manga_index: HashMap<String, usize>,
+    page_sources: HashMap<String, LocalPageSource>,
     stats: LocalLibraryStats,
 }
 
 impl LocalProvider {
     pub fn from_path(path: impl Into<PathBuf>) -> Result<Self, Box<dyn Error>> {
-        let library_path = path.into().canonicalize()?;
+        Ok(Self {
+            library: Arc::new(RwLock::new(Self::load_library(path.into())?)),
+        })
+    }
+
+    fn load_library(path: PathBuf) -> Result<LocalLibrary, Box<dyn Error>> {
+        let library_path = path.canonicalize()?;
         let mangas = scan_path(&library_path)?;
 
         if mangas.is_empty() {
@@ -187,36 +198,50 @@ impl LocalProvider {
 
         let (manga_index, page_sources, stats) = build_library_index(&library_path, &mangas);
 
-        Ok(Self {
+        Ok(LocalLibrary {
             library_path,
-            mangas: Arc::new(mangas),
-            manga_index: Arc::new(manga_index),
-            page_sources: Arc::new(page_sources),
+            mangas,
+            manga_index,
+            page_sources,
             stats,
         })
     }
 
-    pub fn library_path(&self) -> &Path {
-        &self.library_path
+    pub fn reload_from_path(&self, path: impl Into<PathBuf>) -> Result<(), Box<dyn Error>> {
+        let library = Self::load_library(path.into())?;
+        *self.library.write().map_err(|_| "Local library lock poisoned")? = library;
+        Ok(())
     }
 
-    pub fn library_stats(&self) -> &LocalLibraryStats {
-        &self.stats
+    pub fn library_path(&self) -> PathBuf {
+        self.library.read().expect("local library lock poisoned").library_path.clone()
     }
 
-    fn find_manga(&self, manga_id: &str) -> Result<&LocalManga, Box<dyn Error>> {
-        self.manga_index
+    pub fn library_stats(&self) -> LocalLibraryStats {
+        self.library.read().expect("local library lock poisoned").stats.clone()
+    }
+
+    fn mangas(&self) -> Vec<LocalManga> {
+        self.library.read().expect("local library lock poisoned").mangas.clone()
+    }
+
+    fn find_manga(&self, manga_id: &str) -> Result<LocalManga, Box<dyn Error>> {
+        let library = self.library.read().map_err(|_| "Local library lock poisoned")?;
+        library
+            .manga_index
             .get(manga_id)
-            .and_then(|index| self.mangas.get(*index))
+            .and_then(|index| library.mangas.get(*index))
+            .cloned()
             .ok_or_else(|| format!("Local manga not found: {manga_id}").into())
     }
 
-    fn find_chapter(&self, chapter_id: &str, manga_id: &str) -> Result<(&LocalManga, &LocalChapter), Box<dyn Error>> {
+    fn find_chapter(&self, chapter_id: &str, manga_id: &str) -> Result<(LocalManga, LocalChapter), Box<dyn Error>> {
         let manga = self.find_manga(manga_id)?;
         let chapter = manga
             .chapters
             .iter()
             .find(|chapter| chapter.id == chapter_id)
+            .cloned()
             .ok_or_else(|| format!("Local chapter not found: {chapter_id}"))?;
 
         Ok((manga, chapter))
@@ -306,7 +331,15 @@ impl ProviderIdentity for LocalProvider {
 
 impl GetRawImage for LocalProvider {
     async fn get_raw_image(&self, url: &str) -> Result<Bytes, Box<dyn Error>> {
-        if let Some(source) = self.page_sources.get(url) {
+        let source = self
+            .library
+            .read()
+            .map_err(|_| "Local library lock poisoned")?
+            .page_sources
+            .get(url)
+            .cloned();
+
+        if let Some(source) = source.as_ref() {
             return read_local_page_source(source);
         }
 
@@ -324,14 +357,14 @@ impl SearchMangaPanel for LocalProvider {}
 
 impl SearchMangaById for LocalProvider {
     async fn get_manga_by_id(&self, manga_id: &str) -> Result<Manga, Box<dyn Error>> {
-        Ok(Self::to_manga(self.find_manga(manga_id)?))
+        Ok(Self::to_manga(&self.find_manga(manga_id)?))
     }
 }
 
 impl HomePageMangaProvider for LocalProvider {
     async fn get_popular_mangas(&self) -> Result<Vec<PopularManga>, Box<dyn Error>> {
         Ok(self
-            .mangas
+            .mangas()
             .iter()
             .map(|manga| PopularManga {
                 id: manga.id.clone(),
@@ -346,7 +379,7 @@ impl HomePageMangaProvider for LocalProvider {
 
     async fn get_recently_added_mangas(&self) -> Result<Vec<RecentlyAddedManga>, Box<dyn Error>> {
         Ok(self
-            .mangas
+            .mangas()
             .iter()
             .map(|manga| RecentlyAddedManga {
                 id: manga.id.clone(),
@@ -370,7 +403,7 @@ impl SearchPageProvider for LocalProvider {
         pagination: Pagination,
     ) -> Result<GetMangasResponse, Box<dyn Error>> {
         let mut mangas: Vec<SearchManga> = self
-            .mangas
+            .mangas()
             .iter()
             .filter(|manga| {
                 search_term
@@ -449,14 +482,14 @@ impl GetChapterPages for LocalProvider {
 impl GoToReadChapter for LocalProvider {
     async fn read_chapter(&self, chapter_id: &str, manga_id: &str) -> Result<(ChapterToRead, ListOfChapters), Box<dyn Error>> {
         let (manga, chapter) = self.find_chapter(chapter_id, manga_id)?;
-        Ok((self.chapter_to_read(chapter, None), Self::list_of_chapters(manga)))
+        Ok((self.chapter_to_read(&chapter, None), Self::list_of_chapters(&manga)))
     }
 }
 
 impl SearchChapterById for LocalProvider {
     async fn search_chapter(&self, chapter_id: &str, manga_id: &str) -> Result<ChapterToRead, Box<dyn Error>> {
         let (_, chapter) = self.find_chapter(chapter_id, manga_id)?;
-        Ok(self.chapter_to_read(chapter, None))
+        Ok(self.chapter_to_read(&chapter, None))
     }
 }
 
@@ -466,7 +499,7 @@ impl FetchChapterBookmarked for LocalProvider {
         chapter: ChapterBookmarked,
     ) -> Result<(ChapterToRead, ListOfChapters), Box<dyn Error>> {
         let (manga, local_chapter) = self.find_chapter(&chapter.id, &chapter.manga_id)?;
-        Ok((self.chapter_to_read(local_chapter, chapter.number_page_bookmarked), Self::list_of_chapters(manga)))
+        Ok((self.chapter_to_read(&local_chapter, chapter.number_page_bookmarked), Self::list_of_chapters(&manga)))
     }
 }
 
@@ -492,7 +525,15 @@ impl FeedPageProvider for LocalProvider {
 }
 
 impl ReaderPageProvider for LocalProvider {}
-impl MangaProvider for LocalProvider {}
+impl MangaProvider for LocalProvider {
+    fn local_library_stats(&self) -> Option<LocalLibraryStats> {
+        Some(self.library_stats())
+    }
+
+    fn reload_local_library(&self, path: PathBuf) -> Result<(), Box<dyn Error>> {
+        self.reload_from_path(path)
+    }
+}
 
 fn build_library_index(
     library_path: &Path,
@@ -1138,9 +1179,10 @@ mod tests {
         write_png(&manga_dir.join("2.png"))?;
 
         let provider = LocalProvider::from_path(&manga_dir)?;
-        let manga = &provider.mangas[0];
+        let mangas = provider.mangas();
+        let manga = &mangas[0];
 
-        assert_eq!(1, provider.mangas.len());
+        assert_eq!(1, mangas.len());
         assert_eq!("One Shot", manga.title);
         assert_eq!(1, manga.chapters.len());
         assert_eq!(2, manga.chapters[0].pages.len());
@@ -1160,9 +1202,10 @@ mod tests {
         write_png(&manga_dir.join("Chapter 2").join("1.png"))?;
 
         let provider = LocalProvider::from_path(&manga_dir)?;
-        let manga = &provider.mangas[0];
+        let mangas = provider.mangas();
+        let manga = &mangas[0];
 
-        assert_eq!(1, provider.mangas.len());
+        assert_eq!(1, mangas.len());
         assert_eq!("Series", manga.title);
         assert_eq!(2, manga.chapters.len());
         assert_eq!("Chapter 1", manga.chapters[0].title);
@@ -1179,12 +1222,13 @@ mod tests {
         write_png(&dir.path.join("Series B").join("Chapter 1").join("1.png"))?;
 
         let provider = LocalProvider::from_path(&dir.path)?;
+        let mangas = provider.mangas();
 
-        assert_eq!(2, provider.mangas.len());
-        assert_eq!("Series A", provider.mangas[0].title);
-        assert_eq!("Series B", provider.mangas[1].title);
-        assert_eq!(1, provider.mangas[0].chapters.len());
-        assert_eq!(1, provider.mangas[1].chapters.len());
+        assert_eq!(2, mangas.len());
+        assert_eq!("Series A", mangas[0].title);
+        assert_eq!("Series B", mangas[1].title);
+        assert_eq!(1, mangas[0].chapters.len());
+        assert_eq!(1, mangas[1].chapters.len());
 
         Ok(())
     }
@@ -1197,9 +1241,10 @@ mod tests {
         write_cbz(&cbz)?;
 
         let provider = LocalProvider::from_path(&cbz)?;
-        let manga = &provider.mangas[0];
+        let mangas = provider.mangas();
+        let manga = &mangas[0];
 
-        assert_eq!(1, provider.mangas.len());
+        assert_eq!(1, mangas.len());
         assert_eq!("Archive", manga.title);
         assert_eq!(1, manga.chapters.len());
         assert_eq!(2, manga.chapters[0].pages.len());
@@ -1221,9 +1266,10 @@ mod tests {
         write_epub(&epub)?;
 
         let provider = LocalProvider::from_path(&epub)?;
-        let manga = &provider.mangas[0];
+        let mangas = provider.mangas();
+        let manga = &mangas[0];
 
-        assert_eq!(1, provider.mangas.len());
+        assert_eq!(1, mangas.len());
         assert_eq!("Volume", manga.title);
         assert_eq!(1, manga.chapters.len());
         assert_eq!(2, manga.chapters[0].pages.len());
@@ -1232,6 +1278,29 @@ mod tests {
             &manga.chapters[0].pages[0].source,
             LocalPageSource::ZipEntry { entry_name, .. } if entry_name == "OEBPS/Images/2.jpg"
         ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn reload_from_path_replaces_library_index() -> Result<(), Box<dyn Error>> {
+        let first = TestDir::new("reload-first");
+        let second = TestDir::new("reload-second");
+        let first_manga = first.path.join("First");
+        let second_manga = second.path.join("Second");
+
+        write_png(&first_manga.join("1.png"))?;
+        write_png(&second_manga.join("1.png"))?;
+
+        let provider = LocalProvider::from_path(&first_manga)?;
+        assert_eq!("First", provider.mangas()[0].title);
+
+        provider.reload_from_path(&second_manga)?;
+
+        let mangas = provider.mangas();
+        assert_eq!(1, mangas.len());
+        assert_eq!("Second", mangas[0].title);
+        assert_eq!(second_manga.canonicalize()?, provider.library_stats().library_path);
 
         Ok(())
     }

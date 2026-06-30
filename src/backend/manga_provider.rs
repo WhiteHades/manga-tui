@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fmt::Display;
 use std::future::Future;
 use std::io::Cursor;
+use std::path::PathBuf;
 
 use bytes::Bytes;
 use chrono::NaiveDate;
@@ -852,6 +853,13 @@ pub trait ProviderIdentity {
 pub trait MangaProvider:
     HomePageMangaProvider + MangaPageProvider + SearchPageProvider + ReaderPageProvider + FeedPageProvider + Send + Sync
 {
+    fn local_library_stats(&self) -> Option<local::LocalLibraryStats> {
+        None
+    }
+
+    fn reload_local_library(&self, _path: PathBuf) -> Result<(), Box<dyn Error>> {
+        Err("This manga provider does not support local library reloads".into())
+    }
 }
 
 #[cfg(test)]
