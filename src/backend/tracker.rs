@@ -4,8 +4,6 @@ use futures::Future;
 use manga_tui::SearchTerm;
 use serde::{Deserialize, Serialize};
 
-pub mod anilist;
-
 #[derive(Debug, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct MangaToTrack {
     pub id: String,
@@ -40,6 +38,23 @@ pub trait MangaTracker: Send + Clone + 'static {
         &self,
         manga_to_plan_to_read: PlanToReadArgs<'_>,
     ) -> impl Future<Output = Result<(), Box<dyn Error>>> + Send;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DisabledTracker;
+
+impl MangaTracker for DisabledTracker {
+    async fn search_manga_by_title(&self, _title: SearchTerm) -> Result<Option<MangaToTrack>, Box<dyn std::error::Error>> {
+        Ok(None)
+    }
+
+    async fn mark_manga_as_read_with_chapter_count(&self, _manga: MarkAsRead<'_>) -> Result<(), Box<dyn Error>> {
+        Ok(())
+    }
+
+    async fn mark_manga_as_plan_to_read(&self, _manga_to_plan_to_read: PlanToReadArgs<'_>) -> Result<(), Box<dyn Error>> {
+        Ok(())
+    }
 }
 
 async fn update_reading_progress(
