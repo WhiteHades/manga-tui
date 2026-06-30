@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
@@ -28,6 +29,25 @@ use crate::config::ImageQuality;
 use crate::view::widgets::StatefulWidgetFrame;
 
 const LOCAL_CACHE_DIR: &str = "localCache";
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LocalLibraryStats {
+    pub library_path: PathBuf,
+    pub manga_count: usize,
+    pub chapter_count: usize,
+    pub page_count: usize,
+    pub image_folder_count: usize,
+    pub cbz_count: usize,
+    pub cbr_count: usize,
+    pub epub_count: usize,
+    pub total_bytes: u64,
+}
+
+impl LocalLibraryStats {
+    pub fn archive_count(&self) -> usize {
+        self.cbz_count + self.cbr_count + self.epub_count
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct LocalFiltersProvider {
@@ -100,6 +120,28 @@ impl FiltersWidget for LocalFilterWidget {
 struct LocalPage {
     url: Url,
     extension: String,
+    source: LocalPageSource,
+}
+
+#[derive(Clone, Debug)]
+enum LocalPageSource {
+    File(PathBuf),
+    ZipEntry {
+        archive_path: PathBuf,
+        entry_name: String,
+    },
+    RarEntry {
+        archive_path: PathBuf,
+        entry_name: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LocalChapterFormat {
+    ImageFolder,
+    Cbz,
+    Cbr,
+    Epub,
 }
 
 #[derive(Clone, Debug)]
@@ -108,6 +150,7 @@ struct LocalChapter {
     title: String,
     number: String,
     source_path: PathBuf,
+    format: LocalChapterFormat,
     pages: Vec<LocalPage>,
 }
 
@@ -124,6 +167,9 @@ struct LocalManga {
 pub struct LocalProvider {
     library_path: PathBuf,
     mangas: Arc<Vec<LocalManga>>,
+    manga_index: Arc<HashMap<String, usize>>,
+    page_sources: Arc<HashMap<String, LocalPageSource>>,
+    stats: LocalLibraryStats,
 }
 
 impl LocalProvider {
@@ -133,22 +179,35 @@ impl LocalProvider {
 
         if mangas.is_empty() {
             return Err(format!(
-                "No readable local manga found in {}. Supported inputs: image folders, chapter folders, CBZ, and CBR.",
+                "No readable local manga found in {}. Supported inputs: image folders, chapter folders, CBZ, CBR, ZIP, RAR, and EPUB.",
                 library_path.display()
             )
             .into());
         }
 
+        let (manga_index, page_sources, stats) = build_library_index(&library_path, &mangas);
+
         Ok(Self {
             library_path,
             mangas: Arc::new(mangas),
+            manga_index: Arc::new(manga_index),
+            page_sources: Arc::new(page_sources),
+            stats,
         })
     }
 
+    pub fn library_path(&self) -> &Path {
+        &self.library_path
+    }
+
+    pub fn library_stats(&self) -> &LocalLibraryStats {
+        &self.stats
+    }
+
     fn find_manga(&self, manga_id: &str) -> Result<&LocalManga, Box<dyn Error>> {
-        self.mangas
-            .iter()
-            .find(|manga| manga.id == manga_id)
+        self.manga_index
+            .get(manga_id)
+            .and_then(|index| self.mangas.get(*index))
             .ok_or_else(|| format!("Local manga not found: {manga_id}").into())
     }
 
@@ -247,6 +306,10 @@ impl ProviderIdentity for LocalProvider {
 
 impl GetRawImage for LocalProvider {
     async fn get_raw_image(&self, url: &str) -> Result<Bytes, Box<dyn Error>> {
+        if let Some(source) = self.page_sources.get(url) {
+            return read_local_page_source(source);
+        }
+
         let url = Url::parse(url)?;
         let path = url
             .to_file_path()
@@ -431,6 +494,62 @@ impl FeedPageProvider for LocalProvider {
 impl ReaderPageProvider for LocalProvider {}
 impl MangaProvider for LocalProvider {}
 
+fn build_library_index(
+    library_path: &Path,
+    mangas: &[LocalManga],
+) -> (HashMap<String, usize>, HashMap<String, LocalPageSource>, LocalLibraryStats) {
+    let mut manga_index = HashMap::with_capacity(mangas.len());
+    let mut page_sources = HashMap::new();
+    let mut counted_bytes = HashSet::new();
+    let mut stats = LocalLibraryStats {
+        library_path: library_path.to_path_buf(),
+        manga_count: mangas.len(),
+        ..Default::default()
+    };
+
+    for (manga_index_value, manga) in mangas.iter().enumerate() {
+        manga_index.insert(manga.id.clone(), manga_index_value);
+
+        for chapter in &manga.chapters {
+            stats.chapter_count += 1;
+            stats.page_count += chapter.pages.len();
+
+            match chapter.format {
+                LocalChapterFormat::ImageFolder => stats.image_folder_count += 1,
+                LocalChapterFormat::Cbz => stats.cbz_count += 1,
+                LocalChapterFormat::Cbr => stats.cbr_count += 1,
+                LocalChapterFormat::Epub => stats.epub_count += 1,
+            }
+
+            match chapter.format {
+                LocalChapterFormat::ImageFolder => {
+                    for page in &chapter.pages {
+                        if let LocalPageSource::File(path) = &page.source {
+                            counted_bytes.insert(path.clone());
+                        }
+                    }
+                },
+                LocalChapterFormat::Cbz | LocalChapterFormat::Cbr | LocalChapterFormat::Epub => {
+                    counted_bytes.insert(chapter.source_path.clone());
+                },
+            }
+
+            for page in &chapter.pages {
+                page_sources.insert(page.url.to_string(), page.source.clone());
+            }
+        }
+    }
+
+    stats.total_bytes = counted_bytes
+        .into_iter()
+        .filter_map(|path| fs::metadata(path).ok())
+        .filter(|metadata| metadata.is_file())
+        .map(|metadata| metadata.len())
+        .sum();
+
+    (manga_index, page_sources, stats)
+}
+
 fn scan_path(path: &Path) -> Result<Vec<LocalManga>, Box<dyn Error>> {
     if path.is_file() {
         return Ok(vec![manga_from_single_source(path)?]);
@@ -456,6 +575,7 @@ fn scan_directory(path: &Path) -> Result<Vec<LocalManga>, Box<dyn Error>> {
             let number = chapters.len() + 1;
             chapters.push(chapter_from_source(&source, &manga_id, number)?);
         }
+        chapters.sort_by(|a, b| chapter_number_cmp(&a.number, &b.number));
 
         let cover_img_url = find_cover_url(path)?
             .or_else(|| {
@@ -533,8 +653,7 @@ fn chapter_from_source(path: &Path, manga_id: &str, number: usize) -> Result<Loc
         return chapter_from_images(path, manga_id, number, collect_images_recursive(path)?);
     }
 
-    let extracted_path = extract_archive_to_cache(path)?;
-    chapter_from_images(path, manga_id, number, collect_images_recursive(&extracted_path)?)
+    chapter_from_archive(path, manga_id, number)
 }
 
 fn chapter_from_images(
@@ -552,84 +671,178 @@ fn chapter_from_images(
         .map(|path| {
             let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("jpg").to_string();
             let url = Url::from_file_path(&path).map_err(|_| format!("Could not build file URL for {}", path.display()))?;
-            Ok(LocalPage { url, extension })
+            Ok(LocalPage {
+                url,
+                extension,
+                source: LocalPageSource::File(path),
+            })
         })
         .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
 
     Ok(LocalChapter {
         id: local_id(source_path),
         title: title_from_path(source_path),
-        number: number.to_string(),
+        number: chapter_number_from_path(source_path, number),
         source_path: source_path.to_path_buf(),
+        format: LocalChapterFormat::ImageFolder,
         pages,
     })
 }
 
-fn extract_archive_to_cache(path: &Path) -> Result<PathBuf, Box<dyn Error>> {
-    let destination = local_cache_path(path)?;
-    if !collect_images_recursive(&destination).unwrap_or_default().is_empty() {
-        return Ok(destination);
+fn chapter_from_archive(path: &Path, manga_id: &str, number: usize) -> Result<LocalChapter, Box<dyn Error>> {
+    let chapter_id = local_id(path);
+    let format = LocalChapterFormat::try_from_path(path)?;
+    let entries = archive_image_entries(path, format)?;
+
+    if entries.is_empty() {
+        return Err(format!("No readable images found in {}", path.display()).into());
     }
 
-    fs::create_dir_all(&destination)?;
+    let pages = entries
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry_name)| {
+            let extension = extension_from_name(&entry_name).unwrap_or_else(|| "jpg".to_string());
+            let url = local_page_url(&chapter_id, index)?;
+            let source = match format {
+                LocalChapterFormat::Cbz | LocalChapterFormat::Epub => LocalPageSource::ZipEntry {
+                    archive_path: path.to_path_buf(),
+                    entry_name,
+                },
+                LocalChapterFormat::Cbr => LocalPageSource::RarEntry {
+                    archive_path: path.to_path_buf(),
+                    entry_name,
+                },
+                LocalChapterFormat::ImageFolder => unreachable!(),
+            };
 
-    match extension(path).as_deref() {
-        Some("cbz") => extract_cbz(path, &destination)?,
-        Some("cbr") => extract_cbr(path, &destination)?,
-        _ => return Err(format!("Unsupported local archive: {}", path.display()).into()),
-    }
+            Ok(LocalPage {
+                url,
+                extension,
+                source,
+            })
+        })
+        .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
 
-    Ok(destination)
+    Ok(LocalChapter {
+        id: chapter_id,
+        title: title_from_path(path),
+        number: chapter_number_from_path(path, number),
+        source_path: path.to_path_buf(),
+        format,
+        pages,
+    })
 }
 
-fn extract_cbz(path: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
+impl LocalChapterFormat {
+    fn try_from_path(path: &Path) -> Result<Self, Box<dyn Error>> {
+        match extension(path).as_deref() {
+            Some("cbz" | "zip") => Ok(Self::Cbz),
+            Some("cbr" | "rar") => Ok(Self::Cbr),
+            Some("epub") => Ok(Self::Epub),
+            _ => Err(format!("Unsupported local archive: {}", path.display()).into()),
+        }
+    }
+}
+
+fn archive_image_entries(path: &Path, format: LocalChapterFormat) -> Result<Vec<String>, Box<dyn Error>> {
+    match format {
+        LocalChapterFormat::Cbz | LocalChapterFormat::Epub => zip_image_entries(path),
+        LocalChapterFormat::Cbr => rar_image_entries(path),
+        LocalChapterFormat::ImageFolder => Ok(vec![]),
+    }
+}
+
+fn zip_image_entries(path: &Path) -> Result<Vec<String>, Box<dyn Error>> {
     let file = File::open(path)?;
     let mut archive = zip::ZipArchive::new(file)?;
+    let mut entries = vec![];
 
     for index in 0..archive.len() {
-        let mut file = archive.by_index(index)?;
+        let file = archive.by_index(index)?;
         if file.is_dir() || !is_supported_image_name(file.name()) {
             continue;
         }
 
-        if let Some(output_path) = safe_archive_path(destination, file.name()) {
-            if let Some(parent) = output_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let mut output = File::create(output_path)?;
-            io::copy(&mut file, &mut output)?;
-        }
+        entries.push(file.name().to_string());
     }
 
-    Ok(())
+    entries.sort_by(|a, b| natural_cmp(a, b));
+    Ok(entries)
 }
 
-fn extract_cbr(path: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
+fn rar_image_entries(path: &Path) -> Result<Vec<String>, Box<dyn Error>> {
+    let archive = rars::ArchiveReader::read_path(path)?;
+    let mut entries: Vec<String> = archive
+        .members()
+        .filter(|member| !member.meta.is_directory)
+        .map(|member| member.meta.name_lossy())
+        .filter(|name| is_supported_image_name(name))
+        .collect();
+
+    entries.sort_by(|a, b| natural_cmp(a, b));
+    Ok(entries)
+}
+
+fn local_page_url(chapter_id: &str, page_index: usize) -> Result<Url, Box<dyn Error>> {
+    Ok(Url::parse(&format!("local://page/{chapter_id}/{page_index}"))?)
+}
+
+fn read_local_page_source(source: &LocalPageSource) -> Result<Bytes, Box<dyn Error>> {
+    match source {
+        LocalPageSource::File(path) => Ok(Bytes::from(fs::read(path)?)),
+        LocalPageSource::ZipEntry {
+            archive_path,
+            entry_name,
+        } => read_zip_entry(archive_path, entry_name).map(Bytes::from),
+        LocalPageSource::RarEntry {
+            archive_path,
+            entry_name,
+        } => read_rar_entry(archive_path, entry_name).map(Bytes::from),
+    }
+}
+
+fn read_zip_entry(path: &Path, entry_name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+    let file = File::open(path)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+    let mut entry = archive.by_name(entry_name)?;
+    let mut bytes = Vec::with_capacity(entry.size() as usize);
+    io::copy(&mut entry, &mut bytes)?;
+    Ok(bytes)
+}
+
+fn read_rar_entry(path: &Path, entry_name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+    let output_path = archive_entry_cache_path(path, entry_name)?;
+
+    if output_path.exists() {
+        return Ok(fs::read(output_path)?);
+    }
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
     let archive = rars::ArchiveReader::read_path(path)?;
     archive.extract_to(None, |meta| {
-        let name = meta.name_lossy();
-        if meta.is_directory || !is_supported_image_name(&name) {
+        if meta.name_lossy() != entry_name {
             return Ok(Box::new(io::sink()));
         }
 
-        let Some(output_path) = safe_archive_path(destination, &name) else {
-            return Ok(Box::new(io::sink()));
-        };
-
-        if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        Ok(Box::new(File::create(output_path)?))
+        Ok(Box::new(File::create(&output_path)?))
     })?;
 
-    Ok(())
+    Ok(fs::read(output_path)?)
 }
 
 fn local_cache_path(path: &Path) -> Result<PathBuf, Box<dyn Error>> {
     let data_dir = APP_DATA_DIR.as_ref().ok_or("manga-tui data directory is not available")?;
     let data_dir = if data_dir.is_absolute() { data_dir.clone() } else { std::env::current_dir()?.join(data_dir) };
     Ok(data_dir.join(LOCAL_CACHE_DIR).join(local_id(path)))
+}
+
+fn archive_entry_cache_path(path: &Path, entry_name: &str) -> Result<PathBuf, Box<dyn Error>> {
+    safe_archive_path(&local_cache_path(path)?, entry_name)
+        .ok_or_else(|| format!("Could not build safe cache path for archive entry {entry_name}").into())
 }
 
 fn safe_archive_path(destination: &Path, name: &str) -> Option<PathBuf> {
@@ -721,12 +934,13 @@ fn collect_images_recursive(path: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>>
 
 fn sorted_dir_entries(path: &Path) -> Result<Vec<fs::DirEntry>, Box<dyn Error>> {
     let mut entries = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
+    entries.retain(|entry| entry.file_name().to_str().map(|name| !name.starts_with('.')).unwrap_or(true));
     entries.sort_by(|a, b| natural_cmp(&a.file_name().to_string_lossy(), &b.file_name().to_string_lossy()));
     Ok(entries)
 }
 
 fn is_supported_archive(path: &Path) -> bool {
-    matches!(extension(path).as_deref(), Some("cbz" | "cbr"))
+    matches!(extension(path).as_deref(), Some("cbz" | "cbr" | "epub" | "zip" | "rar"))
 }
 
 fn is_supported_image_path(path: &Path) -> bool {
@@ -751,12 +965,44 @@ fn extension(path: &Path) -> Option<String> {
         .map(|extension| extension.to_ascii_lowercase())
 }
 
+fn extension_from_name(name: &str) -> Option<String> {
+    Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+}
+
 fn title_from_path(path: &Path) -> String {
     path.file_stem()
         .or_else(|| path.file_name())
         .and_then(|name| name.to_str())
         .unwrap_or("Local Manga")
         .replace(['_', '-'], " ")
+}
+
+fn chapter_number_from_path(path: &Path, fallback: usize) -> String {
+    let title = title_from_path(path);
+    first_number(&title).unwrap_or_else(|| fallback.to_string())
+}
+
+fn first_number(value: &str) -> Option<String> {
+    let mut number = String::new();
+    let mut started = false;
+
+    for character in value.chars() {
+        if character.is_ascii_digit() || (started && character == '.') {
+            number.push(character);
+            started = true;
+        } else if started {
+            break;
+        }
+    }
+
+    (!number.is_empty()).then_some(number)
+}
+
+fn chapter_number_cmp(a: &str, b: &str) -> Ordering {
+    a.parse::<f64>().unwrap_or(0.0).total_cmp(&b.parse::<f64>().unwrap_or(0.0))
 }
 
 fn local_id(path: &Path) -> String {
@@ -860,6 +1106,21 @@ mod tests {
         Ok(())
     }
 
+    fn write_epub(path: &Path) -> Result<(), Box<dyn Error>> {
+        let file = File::create(path)?;
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+
+        zip.start_file("META-INF/container.xml", options)?;
+        zip.write_all(b"<container />")?;
+        zip.start_file("OEBPS/Images/10.jpg", options)?;
+        zip.write_all(&png_bytes()?)?;
+        zip.start_file("OEBPS/Images/2.jpg", options)?;
+        zip.write_all(&png_bytes()?)?;
+        zip.finish()?;
+        Ok(())
+    }
+
     #[test]
     fn natural_sort_orders_numbered_files() {
         let mut files = ["10.jpg", "2.jpg", "1.jpg"];
@@ -884,6 +1145,8 @@ mod tests {
         assert_eq!(1, manga.chapters.len());
         assert_eq!(2, manga.chapters[0].pages.len());
         assert!(manga.chapters[0].pages[0].url.path().ends_with("2.png"));
+        assert_eq!(2, provider.library_stats().page_count);
+        assert_eq!(1, provider.library_stats().image_folder_count);
 
         Ok(())
     }
@@ -940,7 +1203,52 @@ mod tests {
         assert_eq!("Archive", manga.title);
         assert_eq!(1, manga.chapters.len());
         assert_eq!(2, manga.chapters[0].pages.len());
-        assert!(manga.chapters[0].pages[0].url.path().ends_with("2.png"));
+        assert_eq!(1, provider.library_stats().cbz_count);
+        assert!(!local_cache_path(&cbz)?.exists());
+        assert!(matches!(
+            &manga.chapters[0].pages[0].source,
+            LocalPageSource::ZipEntry { entry_name, .. } if entry_name == "2.png"
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn scans_single_epub_as_one_manga() -> Result<(), Box<dyn Error>> {
+        let dir = TestDir::new("epub");
+        let epub = dir.path.join("Volume.epub");
+
+        write_epub(&epub)?;
+
+        let provider = LocalProvider::from_path(&epub)?;
+        let manga = &provider.mangas[0];
+
+        assert_eq!(1, provider.mangas.len());
+        assert_eq!("Volume", manga.title);
+        assert_eq!(1, manga.chapters.len());
+        assert_eq!(2, manga.chapters[0].pages.len());
+        assert_eq!(1, provider.library_stats().epub_count);
+        assert!(matches!(
+            &manga.chapters[0].pages[0].source,
+            LocalPageSource::ZipEntry { entry_name, .. } if entry_name == "OEBPS/Images/2.jpg"
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires MANGA_TUI_TEST_LIBRARY_DIR to point to a local manga library"]
+    fn scans_configured_local_library() -> Result<(), Box<dyn Error>> {
+        let Some(path) = std::env::var_os("MANGA_TUI_TEST_LIBRARY_DIR").map(PathBuf::from) else {
+            return Ok(());
+        };
+
+        let provider = LocalProvider::from_path(path)?;
+        let stats = provider.library_stats();
+
+        assert!(stats.manga_count > 0);
+        assert!(stats.chapter_count > 0);
+        assert!(stats.page_count > 0);
 
         Ok(())
     }
