@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::process::exit;
 
 use clap::{Parser, Subcommand, crate_version};
-use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
 use crate::backend::APP_DATA_DIR;
@@ -33,12 +32,6 @@ pub struct CliArgs {
     /// Read a local manga library, image folder, CBZ, CBR, or EPUB.
     #[arg(short = 'l', long = "local", value_name = "PATH")]
     pub local: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct Credentials {
-    pub access_token: String,
-    pub client_id: String,
 }
 
 impl CliArgs {

@@ -13,7 +13,7 @@ use manga_tui::SearchTerm;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Paragraph, Widget, Wrap};
-use reqwest::Url;
+use url::Url;
 
 use super::{
     Chapter, ChapterFilters, ChapterOrderBy, ChapterPageUrl, ChapterToRead, DecodeBytesToImage, FeedPageProvider,

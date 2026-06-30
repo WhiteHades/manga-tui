@@ -731,7 +731,7 @@ mod test {
     {
         let picker = Picker::halfblocks();
         let chapter_id = "some_id".to_string();
-        let url_imgs = vec!["http://localhost".parse().unwrap(), "http://localhost".parse().unwrap()];
+        let url_imgs = vec!["local://page/test/0".parse().unwrap(), "local://page/test/0".parse().unwrap()];
         MangaReader::new(
             ChapterToRead {
                 id: chapter_id,
@@ -795,7 +795,7 @@ mod test {
     #[tokio::test]
     async fn init_fetching_and_fetch_pages_should_set_correct_page_count_and_first_page_state_to_loading() {
         let chapter: ChapterToRead = ChapterToRead {
-            pages_url: vec!["http://localhost".parse().unwrap(), "http://localhost".parse().unwrap()],
+            pages_url: vec!["local://page/test/0".parse().unwrap(), "local://page/test/0".parse().unwrap()],
             ..Default::default()
         };
 
@@ -977,7 +977,7 @@ mod test {
             language: Languages::default(),
             volume_number: Some("1".to_string()),
             num_page_bookmarked: None,
-            pages_url: vec!["http://localhost".parse().unwrap()],
+            pages_url: vec!["local://page/test/0".parse().unwrap()],
         };
 
         let api_client = ReaderPageProvierMock::with_response(expected.clone());

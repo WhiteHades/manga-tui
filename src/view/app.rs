@@ -628,7 +628,7 @@ mod tests {
             volume_number: Some("1".to_string()),
             num_page_bookmarked: None,
             language: Languages::default(),
-            pages_url: vec!["http://localhost:3000".parse().unwrap()],
+            pages_url: vec!["local://page/test/0".parse().unwrap()],
         };
 
         let list_of_chapter: ListOfChapters = ListOfChapters {

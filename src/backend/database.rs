@@ -280,7 +280,7 @@ impl<'a> Database<'a> {
                 last_read  DATETIME DEFAULT (datetime('now')),
                 deleted_at  DATETIME NULL,
                 img_url TEXT NULL,
-                manga_provider TEXT NOT NULL DEFAULT mangadex
+                manga_provider TEXT NOT NULL DEFAULT local
              )",
             (),
         )?;
@@ -1228,7 +1228,7 @@ mod test {
             id: &manga_id,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         database.create_chapter_if_not_exists(ChapterToInsert {
@@ -1262,7 +1262,7 @@ mod test {
             id: &manga_id,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         conn.execute("INSERT INTO chapters(id, title, manga_id) VALUES(?1, ?2, ?3)", params![
@@ -1300,7 +1300,7 @@ mod test {
             id: &manga_id,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         let manga_was_saved = database.check_exists(&manga_id, Table::Mangas)?;
@@ -1325,7 +1325,7 @@ mod test {
             id: &manga_id,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         let manga_should_not_be_plan_to_read = database.manga_is_plan_to_read(&manga_id)?;
@@ -1336,7 +1336,7 @@ mod test {
             id: &manga_id,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         let manga_should_be_plan_to_read = database.manga_is_plan_to_read(&manga_id)?;
@@ -1366,7 +1366,7 @@ mod test {
                 id: &chapter_id,
                 ..Default::default()
             },
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         let manga_was_created = database.check_exists(&manga_id, Table::Mangas)?;
@@ -1396,7 +1396,7 @@ mod test {
             title: "some_title",
             img_url: None,
 
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         database.save_history(MangaReadingHistorySave {
@@ -1408,7 +1408,7 @@ mod test {
                 ..Default::default()
             },
 
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         let chapters = get_all_chapters(&connection)?;
@@ -1436,7 +1436,7 @@ mod test {
             id: &manga_id,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         let chapter_which_is_already_reading = ChapterToInsert {
@@ -1461,7 +1461,7 @@ mod test {
                     id: &chapter_id,
                     ..Default::default()
                 },
-                provider: MangaProviders::Weebcentral,
+                provider: MangaProviders::Local,
             })
             .expect("could not save chapter history");
 
@@ -1493,7 +1493,7 @@ mod test {
             id: &manga_id,
             title: "some_manga",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         database.create_chapter_if_not_exists(ChapterToInsert {
@@ -1546,7 +1546,7 @@ mod test {
             id: &manga_is_in_reading_history_id,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         database.insert_manga_in_reading_history(&manga_is_in_reading_history_id)?;
@@ -1555,7 +1555,7 @@ mod test {
             id: &manga_not_in_reading_history_id,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         let history = database.get_history(GetHistoryArgs {
@@ -1563,7 +1563,7 @@ mod test {
             page: 1,
             search: None,
             items_per_page: 100,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         assert!(history.total_items > 0);
@@ -1581,26 +1581,26 @@ mod test {
         let database = Database::new(&connection);
         database.setup()?;
 
-        let manga_id_mangadex = Uuid::new_v4().to_string();
-        let manga_id_weebcentral = Uuid::new_v4().to_string();
+        let manga_id_local = Uuid::new_v4().to_string();
+        let manga_id_other_local = Uuid::new_v4().to_string();
 
         database.create_manga_if_not_exists(MangaInsert {
-            id: &manga_id_weebcentral,
-            title: "of Weebcentral",
+            id: &manga_id_other_local,
+            title: "Other local series",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_weebcentral)?;
+        database.insert_manga_in_reading_history(&manga_id_other_local)?;
 
         database.create_manga_if_not_exists(MangaInsert {
-            id: &manga_id_mangadex,
-            title: "of mangadex",
+            id: &manga_id_local,
+            title: "Local series",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_mangadex)?;
+        database.insert_manga_in_reading_history(&manga_id_local)?;
 
         // No search term
         let history = database.get_history(GetHistoryArgs {
@@ -1608,29 +1608,27 @@ mod test {
             page: 1,
             search: None,
             items_per_page: 100,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
-        // There are 2 mangas but of Weebcentral there is only one
-        assert_eq!(1, history.total_items);
+        assert_eq!(2, history.total_items);
 
-        assert!(!history.mangas.iter().any(|manga| manga.id == manga_id_mangadex));
+        assert!(history.mangas.iter().any(|manga| manga.id == manga_id_local));
 
-        assert!(history.mangas.iter().any(|manga| manga.id == manga_id_weebcentral));
+        assert!(history.mangas.iter().any(|manga| manga.id == manga_id_other_local));
 
         let history = database.get_history(GetHistoryArgs {
             hist_type: MangaHistoryType::ReadingHistory,
             page: 1,
-            search: SearchTerm::trimmed_lowercased("Weebcentral"),
+            search: SearchTerm::trimmed_lowercased("Other"),
             items_per_page: 100,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        // Should be 0 because it is requesting mangas from mangadex
-        assert_eq!(0, history.total_items);
+        assert_eq!(1, history.total_items);
 
-        assert!(!history.mangas.iter().any(|manga| manga.id == manga_id_mangadex));
-        assert!(!history.mangas.iter().any(|manga| manga.id == manga_id_weebcentral));
+        assert!(!history.mangas.iter().any(|manga| manga.id == manga_id_local));
+        assert!(history.mangas.iter().any(|manga| manga.id == manga_id_other_local));
 
         Ok(())
     }
@@ -1648,7 +1646,7 @@ mod test {
             id: &manga_id_filtered_out,
             title: "filtered_out",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         database.insert_manga_in_reading_history(&manga_id_filtered_out)?;
@@ -1657,7 +1655,7 @@ mod test {
             id: &manga_id_included_in_search,
             title: "included",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         database.insert_manga_in_reading_history(&manga_id_included_in_search)?;
@@ -1667,7 +1665,7 @@ mod test {
             page: 1,
             search: SearchTerm::trimmed_lowercased("Included"),
             items_per_page: 100,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         assert!(history.total_items > 0);
@@ -1691,14 +1689,14 @@ mod test {
             id: &manga_id_filtered_out,
             title: "filtered_out",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         };
 
         let manga_included = MangaPlanToReadSave {
             id: &manga_id_included_in_search,
             title: "included",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         };
 
         database.save_plan_to_read(manga_filtered_out)?;
@@ -1710,7 +1708,7 @@ mod test {
             page: 1,
             search: SearchTerm::trimmed_lowercased("Included"),
             items_per_page: 100,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         assert!(history.total_items > 0);
@@ -1734,14 +1732,14 @@ mod test {
             id: &manga_id_1,
             title: "manga_1",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         };
 
         let manga_2 = MangaPlanToReadSave {
             id: &manga_id_2,
             title: "manga_2",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         };
 
         database.save_plan_to_read(manga_1)?;
@@ -1753,7 +1751,7 @@ mod test {
             page: 1,
             search: None,
             items_per_page: 100,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         assert!(history.total_items > 0);
@@ -1781,7 +1779,7 @@ mod test {
             manga_id: &manga_id,
             manga_title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         assert!(database.check_exists(&manga_id, Table::Mangas)?);
@@ -1813,7 +1811,7 @@ mod test {
             id: &manga_id_exist_in_database,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         database.create_chapter_if_not_exists(ChapterToInsert {
@@ -1831,7 +1829,7 @@ mod test {
             manga_id: &manga_id_exist_in_database,
             manga_title: "some_title",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         let chapters = get_all_chapters(&connection)?;
@@ -1860,7 +1858,7 @@ mod test {
             id: &manga_id,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         database.set_chapter_downloaded(SetChapterDownloaded {
@@ -1869,7 +1867,7 @@ mod test {
             manga_id: &manga_id,
             manga_title: "some_title",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         let chapters = get_all_chapters(&connection)?;
@@ -2035,7 +2033,7 @@ mod test {
             id: &id_manga,
             title: "some_title",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
         let id_was_created: String = connection
@@ -2049,7 +2047,7 @@ mod test {
                 id: &id_manga,
                 title: "some_title",
                 img_url: None,
-                provider: MangaProviders::Weebcentral,
+                provider: MangaProviders::Local,
             })
             .expect("should not try to create already existing manga");
 
@@ -2152,46 +2150,46 @@ mod test {
         let database = Database::new(&connection);
         database.setup()?;
 
-        let manga_id_mangadex = Uuid::new_v4().to_string();
-        let manga_id_mangadex2 = Uuid::new_v4().to_string();
+        let manga_id_local = Uuid::new_v4().to_string();
+        let manga_id_local2 = Uuid::new_v4().to_string();
 
         database.create_manga_if_not_exists(MangaInsert {
-            id: &manga_id_mangadex,
-            title: "of mangadex 1",
+            id: &manga_id_local,
+            title: "of local 1",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_mangadex)?;
+        database.insert_manga_in_reading_history(&manga_id_local)?;
 
         database.create_manga_if_not_exists(MangaInsert {
-            id: &manga_id_mangadex2,
-            title: "of mangadex 2",
+            id: &manga_id_local2,
+            title: "of local 2",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_mangadex2)?;
+        database.insert_manga_in_reading_history(&manga_id_local2)?;
 
         let expected = database.get_history(GetHistoryArgs {
             hist_type: MangaHistoryType::ReadingHistory,
             page: 1,
             search: None,
             items_per_page: 10,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         /* at this point 2 mangas must be stored in reading history */
         assert_eq!(expected.mangas.len(), 2);
 
-        database.remove_from_history(&manga_id_mangadex, MangaHistoryType::ReadingHistory)?;
+        database.remove_from_history(&manga_id_local, MangaHistoryType::ReadingHistory)?;
 
         let expected = database.get_history(GetHistoryArgs {
             hist_type: MangaHistoryType::ReadingHistory,
             page: 1,
             search: None,
             items_per_page: 10,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         /* now only one should exist */
@@ -2206,46 +2204,46 @@ mod test {
         let database = Database::new(&connection);
         database.setup()?;
 
-        let manga_id_mangadex = Uuid::new_v4().to_string();
-        let manga_id_mangadex2 = Uuid::new_v4().to_string();
+        let manga_id_local = Uuid::new_v4().to_string();
+        let manga_id_local2 = Uuid::new_v4().to_string();
 
         database.save_plan_to_read(MangaPlanToReadSave {
-            id: &manga_id_mangadex,
-            title: "of mangadex 1",
+            id: &manga_id_local,
+            title: "of local 1",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_mangadex)?;
+        database.insert_manga_in_reading_history(&manga_id_local)?;
 
         database.save_plan_to_read(MangaPlanToReadSave {
-            id: &manga_id_mangadex2,
-            title: "of mangadex 2",
+            id: &manga_id_local2,
+            title: "of local 2",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_mangadex2)?;
+        database.insert_manga_in_reading_history(&manga_id_local2)?;
 
         let expected = database.get_history(GetHistoryArgs {
             hist_type: MangaHistoryType::PlanToRead,
             page: 1,
             search: None,
             items_per_page: 10,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         /* at this point 2 mangas must be stored in reading history */
         assert_eq!(expected.mangas.len(), 2);
 
-        database.remove_from_history(&manga_id_mangadex, MangaHistoryType::PlanToRead)?;
+        database.remove_from_history(&manga_id_local, MangaHistoryType::PlanToRead)?;
 
         let expected = database.get_history(GetHistoryArgs {
             hist_type: MangaHistoryType::PlanToRead,
             page: 1,
             search: None,
             items_per_page: 10,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         /* now only one should exist */
@@ -2256,7 +2254,7 @@ mod test {
             page: 1,
             search: None,
             items_per_page: 10,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         /* the reading history should be ketp the same */
@@ -2271,98 +2269,98 @@ mod test {
         let database = Database::new(&connection);
         database.setup()?;
 
-        let manga_id_mangadex = Uuid::new_v4().to_string();
-        let manga_id_mangadex2 = Uuid::new_v4().to_string();
-        let manga_id_mangadex3 = Uuid::new_v4().to_string();
+        let manga_id_local = Uuid::new_v4().to_string();
+        let manga_id_local2 = Uuid::new_v4().to_string();
+        let manga_id_local3 = Uuid::new_v4().to_string();
 
         let manga_id_plan_to_read = Uuid::new_v4().to_string();
         let manga_id_plan_to_read2 = Uuid::new_v4().to_string();
 
-        let manga_id_weeb_central = Uuid::new_v4().to_string();
-        let manga_id_weeb_centra2 = Uuid::new_v4().to_string();
+        let manga_id_other_local = Uuid::new_v4().to_string();
+        let manga_id_other_local2 = Uuid::new_v4().to_string();
 
         database.save_plan_to_read(MangaPlanToReadSave {
-            id: &manga_id_mangadex,
-            title: "of mangadex 1",
+            id: &manga_id_local,
+            title: "of local 1",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_mangadex)?;
+        database.insert_manga_in_reading_history(&manga_id_local)?;
 
         database.save_plan_to_read(MangaPlanToReadSave {
-            id: &manga_id_mangadex2,
-            title: "of mangadex 2",
+            id: &manga_id_local2,
+            title: "of local 2",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_mangadex2)?;
+        database.insert_manga_in_reading_history(&manga_id_local2)?;
 
         database.create_manga_if_not_exists(MangaInsert {
-            id: &manga_id_mangadex3,
-            title: "of mangadex 3",
+            id: &manga_id_local3,
+            title: "of local 3",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_mangadex3)?;
+        database.insert_manga_in_reading_history(&manga_id_local3)?;
 
         database.create_manga_if_not_exists(MangaInsert {
-            id: &manga_id_weeb_central,
-            title: "of weebcentral",
+            id: &manga_id_other_local,
+            title: "of other local",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_weeb_central)?;
+        database.insert_manga_in_reading_history(&manga_id_other_local)?;
 
         database.create_manga_if_not_exists(MangaInsert {
-            id: &manga_id_weeb_centra2,
-            title: "of weebcentral #2",
+            id: &manga_id_other_local2,
+            title: "of other local #2",
             img_url: None,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
-        database.insert_manga_in_reading_history(&manga_id_weeb_centra2)?;
+        database.insert_manga_in_reading_history(&manga_id_other_local2)?;
 
         let expected = database.get_history(GetHistoryArgs {
             hist_type: MangaHistoryType::ReadingHistory,
             page: 1,
             search: None,
             items_per_page: 10,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        /* at this point 3 mangas must be stored in reading history */
-        assert_eq!(expected.mangas.len(), 3);
+        /* at this point 5 mangas must be stored in reading history */
+        assert_eq!(expected.mangas.len(), 5);
 
         database.create_manga_if_not_exists(MangaInsert {
             id: &manga_id_plan_to_read,
-            title: "of mangadex 1",
+            title: "of local 1",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         database.save_plan_to_read(MangaPlanToReadSave {
             id: &manga_id_plan_to_read,
-            title: "of mangadex 1 plan to read",
+            title: "of local 1 plan to read",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         database.create_manga_if_not_exists(MangaInsert {
             id: &manga_id_plan_to_read2,
-            title: "of mangadex 1",
+            title: "of local 1",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         database.save_plan_to_read(MangaPlanToReadSave {
             id: &manga_id_plan_to_read2,
-            title: "of mangadex 2 plan to read",
+            title: "of local 2 plan to read",
             img_url: None,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         let expected = database.get_history(GetHistoryArgs {
@@ -2370,23 +2368,23 @@ mod test {
             page: 1,
             search: None,
             items_per_page: 10,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         /* at this point 4 mangas in plant to read should exist */
         assert_eq!(expected.mangas.len(), 4);
 
-        database.remove_all_from_history(MangaHistoryType::ReadingHistory, MangaProviders::Mangadex)?;
+        database.remove_all_from_history(MangaHistoryType::ReadingHistory, MangaProviders::Local)?;
 
         let expected = database.get_history(GetHistoryArgs {
             hist_type: MangaHistoryType::ReadingHistory,
             page: 1,
             search: None,
             items_per_page: 10,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
-        /* now none from mangadex should exist */
+        /* now none from local should exist */
         assert_eq!(expected.mangas.len(), 0);
 
         let expected = database.get_history(GetHistoryArgs {
@@ -2394,18 +2392,17 @@ mod test {
             page: 1,
             search: None,
             items_per_page: 10,
-            provider: MangaProviders::Weebcentral,
+            provider: MangaProviders::Local,
         })?;
 
-        /* weebcentral reading history should remain untouched */
-        assert_eq!(expected.mangas.len(), 2);
+        assert_eq!(expected.mangas.len(), 0);
 
         let expected = database.get_history(GetHistoryArgs {
             hist_type: MangaHistoryType::PlanToRead,
             page: 1,
             search: None,
             items_per_page: 10,
-            provider: MangaProviders::Mangadex,
+            provider: MangaProviders::Local,
         })?;
 
         /* the plan to read history should remain untouched */

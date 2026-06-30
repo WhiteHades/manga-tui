@@ -284,7 +284,7 @@ fn migrate_version_0_6_0(connection: &mut Connection, logger: &impl ILogger) -> 
         table_name: "mangas",
         command: AlterTableCommand::Add {
             column: "manga_provider",
-            data_type: "TEXT NOT NULL DEFAULT mangadex",
+            data_type: "TEXT NOT NULL DEFAULT local",
         },
     }];
 
@@ -812,7 +812,7 @@ mod tests {
         conn.execute("INSERT INTO mangas(id, title, manga_provider) VALUES(?1, ?2, ?3)", params![
             Uuid::new_v4().to_string(),
             "Some title",
-            MangaProviders::Mangadex.to_string()
+            MangaProviders::Local.to_string()
         ])
         .expect("Migration did not add expected column `manga_provider`");
 

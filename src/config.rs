@@ -17,9 +17,6 @@ use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter};
 use toml::Table;
 
-use crate::backend::manga_provider::MangaProviders;
-use crate::cli::Credentials;
-
 static CONFIG_FILE_NAME: &str = "config.toml";
 
 static CONFIG_FILE_NAME_BACKUP: &str = "config_backup.toml";
@@ -173,149 +170,6 @@ impl ConfigParam for AmountPagesParam {
     }
 }
 
-#[derive(Debug, Default)]
-struct TrackReadingWhenDownload;
-
-impl ConfigParam for TrackReadingWhenDownload {
-    fn name(&self) -> &'static str {
-        "track_reading_when_download"
-    }
-
-    fn comments(&self) -> &'static str {
-        "Whether or not downloading a manga counts as reading it on services like anilist"
-    }
-
-    fn values(&self) -> &'static str {
-        "true, false"
-    }
-
-    fn defaults(&self) -> &'static str {
-        "false"
-    }
-}
-
-#[derive(Debug, Default)]
-struct CheckNewUpdates;
-
-impl ConfigParam for CheckNewUpdates {
-    fn name(&self) -> &'static str {
-        "check_new_updates"
-    }
-
-    fn comments(&self) -> &'static str {
-        "Enable / disable checking for new updates"
-    }
-
-    fn values(&self) -> &'static str {
-        "true, false"
-    }
-
-    fn defaults(&self) -> &'static str {
-        "true"
-    }
-}
-
-#[derive(Debug, Default)]
-struct TrackReadingHistory;
-
-impl ConfigParam for TrackReadingHistory {
-    fn name(&self) -> &'static str {
-        "track_reading_history"
-    }
-
-    fn comments(&self) -> &'static str {
-        "Enable / disable tracking reading history with services like `anilist`"
-    }
-
-    fn values(&self) -> &'static str {
-        "true, false"
-    }
-
-    fn defaults(&self) -> &'static str {
-        "true"
-    }
-}
-
-#[derive(Debug, Default)]
-struct DefaultMangaProvider;
-
-impl ConfigParam for DefaultMangaProvider {
-    fn name(&self) -> &'static str {
-        "default_manga_provider"
-    }
-
-    fn comments(&self) -> &'static str {
-        "Sets which manga provider will be used when running manga-tui, \n# you can override it by running manga-tui with the -p flag like this: manga-tui -p weebcentral"
-    }
-
-    fn values(&self) -> &'static str {
-        "mangadex, weebcentral, mangapill"
-    }
-
-    fn defaults(&self) -> &'static str {
-        r#""mangadex""#
-    }
-}
-
-#[derive(Debug, Default)]
-struct AnilistClientId;
-
-impl ConfigParam for AnilistClientId {
-    fn name(&self) -> &'static str {
-        "client_id"
-    }
-
-    fn comments(&self) -> &'static str {
-        "Your client id from your anilist account\n# leave it as an empty string \"\" if you don't want to use the config file to read your anilist credentials"
-    }
-
-    fn values(&self) -> &'static str {
-        "string"
-    }
-
-    fn defaults(&self) -> &'static str {
-        r#""""#
-    }
-}
-
-#[derive(Debug, Default)]
-struct AnilistAccessToken;
-
-impl ConfigParam for AnilistAccessToken {
-    fn name(&self) -> &'static str {
-        "access_token"
-    }
-
-    fn comments(&self) -> &'static str {
-        "Your acces token from your anilist account\n# leave it as an empty string \"\" if you don't want to use the config file to read your anilist credentials"
-    }
-
-    fn values(&self) -> &'static str {
-        "string"
-    }
-
-    fn defaults(&self) -> &'static str {
-        "\"\""
-    }
-}
-
-#[derive(Debug, Default)]
-struct AnilistConfigTable;
-
-impl TableParam for AnilistConfigTable {
-    fn table_name(&self) -> &'static str {
-        "anilist"
-    }
-
-    fn comments(&self) -> &'static str {
-        "Anilist-related config, if you want `manga-tui` to read your anilist credentials from this file then place them here"
-    }
-
-    fn parameters(&self) -> Vec<Box<dyn ConfigParam>> {
-        vec![Box::new(AnilistClientId), Box::new(AnilistAccessToken)]
-    }
-}
-
 /// Builder for the configuration file.
 /// Handles creation, updating, and writing of the config file and its directory.
 struct ConfigBuilder<'a> {
@@ -327,20 +181,11 @@ struct ConfigBuilder<'a> {
 
 /// The params the config file has which look like: param_name = "value"
 fn config_params() -> Vec<Box<dyn ConfigParam>> {
-    vec![
-        Box::new(DownloadTypeParam),
-        Box::new(ImageQualityParam),
-        Box::new(AmountPagesParam),
-        Box::new(AutoBookmarkParam),
-        Box::new(TrackReadingWhenDownload),
-        Box::new(CheckNewUpdates),
-        Box::new(DefaultMangaProvider),
-        Box::new(TrackReadingHistory),
-    ]
+    vec![Box::new(DownloadTypeParam), Box::new(ImageQualityParam), Box::new(AmountPagesParam), Box::new(AutoBookmarkParam)]
 }
 
 fn table_config_params() -> Vec<Box<dyn TableParam>> {
-    vec![Box::new(AnilistConfigTable)]
+    vec![]
 }
 
 impl<'a> ConfigBuilder<'a> {
@@ -520,14 +365,6 @@ impl<'a> ConfigBuilder<'a> {
     }
 }
 
-/// Configuration for Anilist integration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct AnilistConfig {
-    /// Credentials for Anilist API.
-    #[serde(flatten)]
-    pub credentials: Credentials,
-}
-
 /// Main configuration struct for manga-tui.
 ///
 /// This struct is deserialized from the config file and contains all
@@ -542,16 +379,6 @@ pub struct MangaTuiConfig {
     pub auto_bookmark: bool,
     /// Number of pages to prefetch around the current page.
     pub amount_pages: u8,
-    /// Whether downloading counts as reading for tracking services.
-    pub track_reading_when_download: bool,
-    /// Whether to check for new updates.
-    pub check_new_updates: bool,
-    /// The default manga provider.
-    pub default_manga_provider: MangaProviders,
-    /// Wether or not to use services like anilist to track reading history
-    pub track_reading_history: bool,
-    /// Anilist configuration.
-    pub anilist: AnilistConfig,
 }
 
 /// Download format options.
@@ -579,13 +406,8 @@ impl Default for MangaTuiConfig {
         Self {
             amount_pages: 5,
             auto_bookmark: true,
-            check_new_updates: true,
             download_type: DownloadType::default(),
             image_quality: ImageQuality::default(),
-            track_reading_when_download: false,
-            track_reading_history: true,
-            default_manga_provider: MangaProviders::default(),
-            anilist: AnilistConfig::default(),
         }
     }
 }
@@ -607,19 +429,6 @@ impl MangaTuiConfig {
     /// Parses the configuration from a string.
     fn from_str(raw_file: &str) -> Result<Self, Box<dyn Error>> {
         Ok(toml::from_str(raw_file)?)
-    }
-
-    /// Returns Anilist credentials if both client_id and access_token are set, meaning the user
-    /// wants their credentials to be coming from the config file
-    pub fn check_anilist_credentials(&self) -> Option<Credentials> {
-        if self.anilist.credentials.client_id.is_empty() || self.anilist.credentials.access_token.is_empty() {
-            return None;
-        }
-
-        Some(Credentials {
-            access_token: self.anilist.credentials.access_token.clone(),
-            client_id: self.anilist.credentials.client_id.clone(),
-        })
     }
 }
 
@@ -833,35 +642,6 @@ mod tests {
         assert_eq!(true, new_config.get("check_new_updates").unwrap().as_bool().unwrap());
 
         Ok(())
-    }
-
-    #[test]
-    fn anilist_credentials_are_returned_if_not_empty() {
-        let mut config = MangaTuiConfig::default();
-
-        assert!(config.check_anilist_credentials().is_none());
-
-        config.anilist.credentials.client_id = "12938".to_string();
-
-        assert!(config.check_anilist_credentials().is_none());
-
-        let mut config = MangaTuiConfig::default();
-
-        config.anilist.credentials.access_token = "some_token".to_string();
-
-        assert!(config.check_anilist_credentials().is_none());
-
-        config.anilist.credentials.client_id = "12938".to_string();
-
-        config.anilist.credentials.access_token = "some_token".to_string();
-
-        assert_eq!(
-            Credentials {
-                client_id: config.anilist.credentials.client_id.clone(),
-                access_token: config.anilist.credentials.access_token.clone()
-            },
-            config.check_anilist_credentials().unwrap()
-        );
     }
 
     #[test]

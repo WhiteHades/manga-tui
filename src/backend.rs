@@ -10,15 +10,11 @@ use self::error_log::create_error_logs_files;
 use crate::config::build_config_file;
 use crate::logger::ILogger;
 
-pub mod cache;
 pub mod database;
 pub mod error_log;
-pub mod html_parser;
 pub mod manga_downloader;
 pub mod manga_provider;
 pub mod migration;
-pub mod release_notifier;
-pub mod secrets;
 pub mod tracker;
 pub mod tui;
 

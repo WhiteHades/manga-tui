@@ -12,8 +12,7 @@ use crate::backend::manga_downloader::pdf_downloader::PdfDownloader;
 use crate::backend::manga_downloader::raw_images::RawImagesDownloader;
 use crate::backend::manga_downloader::{ChapterToDownloadSanitized, MangaDownloader};
 use crate::backend::manga_provider::{Chapter, Languages, MangaPageProvider};
-use crate::backend::tracker::{MangaTracker, track_manga};
-use crate::common::format_error_message_tracking_reading_history;
+use crate::backend::tracker::MangaTracker;
 use crate::config::{DownloadType, MangaTuiConfig};
 use crate::view::pages::manga::MangaPageEvents;
 
@@ -152,9 +151,6 @@ pub async fn download_single_chapter<T: MangaPageProvider, S: MangaTracker>(args
         Ok(pages) => {
             let original_chapter_title = args.chapter.title.clone();
             let chapter_id = args.chapter.id.clone();
-            let chapter_number = args.chapter.chapter_number.clone();
-            let volume_number = args.chapter.volume_number.clone();
-            let manga_title_copy = args.manga_title.clone();
             let chapter_to_download: ChapterToDownloadSanitized = ChapterToDownloadSanitized {
                 chapter_id: args.chapter.id_safe_for_download,
                 manga_id: args.manga_id_safe_for_download,
@@ -167,29 +163,6 @@ pub async fn download_single_chapter<T: MangaPageProvider, S: MangaTracker>(args
                 download_type: args.config.download_type,
                 pages,
             };
-            if args.config.track_reading_when_download {
-                // clone chapter title so that it can be used inside `track_manga` error
-                // closure
-                let chapter_title_error = original_chapter_title.clone();
-                track_manga(
-                    args.manga_tracker,
-                    manga_title_copy.clone(),
-                    // This conversion is needed so that we take into account chapters
-                    // like 1.2, 10.1 etc
-                    chapter_number.parse::<f64>().unwrap_or(0.0) as u32,
-                    volume_number.and_then(|vol| vol.parse().ok()),
-                    move |error| {
-                        write_to_error_log(
-                            format_error_message_tracking_reading_history(
-                                chapter_title_error.clone(),
-                                manga_title_copy.clone(),
-                                error,
-                            )
-                            .into(),
-                        );
-                    },
-                );
-            }
 
             let downloader: &dyn MangaDownloader = match args.config.download_type {
                 DownloadType::Cbz => &CbzDownloader::new(),

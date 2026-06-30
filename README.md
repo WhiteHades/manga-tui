@@ -1,319 +1,132 @@
-<h1 align="center">
-<strong> 📖 Manga-tui 🖥️ </strong>
-</h1>
+# manga-tui
 
-<h3 align="center">
-    Terminal-based manga reader and downloader written in rust 🦀
-</h3>
-<div align="center">
-    <a href="https://github.com/josueBarretogit/manga-tui/actions/workflows/test.yml">
-        <img alt="test passing" src="https://img.shields.io/github/actions/workflow/status/josueBarretogit/manga-tui/test.yml?label=tests">
-    </a>
-    <a href="https://crates.io/crates/manga-tui">
-        <img alt="Crates.io downloads" src="https://img.shields.io/crates/d/manga-tui">
-    </a>
-    <a href="https://github.com/josueBarretogit/manga-tui/releases/latest">
-        <img alt="downloads" src="https://img.shields.io/github/downloads/josuebarretogit/manga-tui/total">
-    </a>
-    <a href="https://github.com/josueBarretogit/manga-tui/blob/main/LICENSE">
-        <img alt="License" src="https://img.shields.io/github/license/josueBarretogit/Manga-tui?style=flat-square&color=blue">
-    </a>
-</div >
-
-<p align="center">
-
-<https://github.com/user-attachments/assets/2b693bd3-ec30-4d6e-bcc4-6cf457a860b1>
-
-</p>
-
-## Table of contents
-
-- [Features](#features)
-- [Dependencies](#dependencies)
-- [Installation](#installation)
-- [Image rendering](#image-rendering)
-- [Usage](#usage)
-- [Manga providers](#manga-providers)
-- [Configuration](#configuration)
-- [Motivation](#motivation)
-- [Credits](#credits)
+`manga-tui` is an offline terminal manga library and reader. It reads local folders and archives directly from disk, keeps history/bookmarks locally, and does not use online manga providers.
 
 ## Features
 
-- [Mangadex](https://mangadex.org/), [Weebcentral](https://weebcentral.com/), [MangaPill](https://mangapill.com), and local manga folders/CBZ/CBR are available as manga providers (many more willl be added!)
-so if any one goes down you can still use manga-tui
+- Local-first library view for folders, image folders, CBZ/ZIP, CBR/RAR, and EPUB.
+- Lazy archive indexing: archives are scanned for page names without full extraction, and pages are read when opened.
+- In-app Stats page with library path, manga/chapter/page totals, format counts, and library reload.
+- Vim-style navigation across Library, Search, Stats, Manga, and Reader screens.
+- Inline image reader with stable page/status panels and centered page rendering.
+- Local downloads to CBZ, EPUB, PDF, or raw images.
 
-- Track your reading history with [anilist integration](./docs/anilist.md)
+## Install
 
-- Advanced search (with filters)
-
-<https://github.com/user-attachments/assets/c1e21aa1-8a51-4c47-baea-9f56dcd0d6a4>
-
-- Read manga in your terminal with terminals such as: Wezterm, iTerm2, Kitty, Ghostty
-  
-<https://github.com/user-attachments/assets/70f321ff-13d1-4c4b-9c37-604271456ab2>
-
-- Reading history is stored locally (with no login required)
-
- <https://github.com/user-attachments/assets/47e88e89-f73c-4575-9645-2abb80ca7d63>
-
-- Download manga (available formats: cbz, epub, pdf and raw images)
-
-<https://github.com/user-attachments/assets/ba785668-7cf1-4367-93f9-6e6e1f72c12c>
-
-- Download all chapters of a manga (available formats: cbz, epub, pdf and raw images)
-
-<https://github.com/user-attachments/assets/26ad493f-633c-41fc-9d09-49b316118923>
-
-### Join the [discord](https://discord.gg/SeqsWUCpVx) server for further help, feature requests or to chat with contributors
-
-## Dependencies
-
-On linux you may need to install the D-bus secret service library
-
-### Debian
-
-```shell
-sudo apt install libdbus-1-dev pkg-config
-```
-
-### Fedora
-
-```shell
-sudo dnf install dbus-devel pkgconf-pkg-config
-```
-
-### Arch
-
-```shell
-sudo pacman -S dbus pkgconf
-```
-
-## Installation
-
-### Using cargo
-
-```shell
-cargo install manga-tui --locked
-```
-
-### AUR
-
-You can install `manga-tui` from the [AUR](https://aur.archlinux.org/packages/manga-tui) with using an [AUR helper](https://wiki.archlinux.org/title/AUR_helpers).
-
-```shell
-paru -S manga-tui
-```
-
-### Nix
-
-If you have the [Nix package manager](https://nixos.org/), this repo provides a flake that builds the latest git version from source.
-
-Simply run the following:
+From this checkout:
 
 ```sh
-nix run 'github:josueBarretogit/manga-tui'
+cargo install --path . --force --locked
 ```
 
-Or, to install persistently:
+Then run:
 
 ```sh
-nix profile install 'github:josueBarretogit/manga-tui'
-```
-
-## Binary release
-
-Download a binary from the [releases page](https://github.com/josueBarretogit/manga-tui/releases/latest)
-
-## Image rendering
-
-Use a terminal that can render images such as [Wezterm](https://wezfurlong.org/wezterm/index.html) (Personally I recommend using this one It's the one used in the videos), [iTerm2](https://iterm2.com/), [Kitty](https://sw.kovidgoyal.net/kitty/) and [Ghostty](https://ghostty.org/download)  <br />
-For more information see: [image-support](https://github.com/benjajaja/ratatui-image?tab=readme-ov-file#compatibility-matrix)
-
-> [!WARNING]
-> On windows image display is very buggy, see [this issue](https://github.com/josueBarretogit/manga-tui/issues/26) for more information
-
-No images will be displayed if the terminal does not have image support  (but `manga-tui` will still work as a manga downloader)
-
-Portrait pages are centered in the reader, and landscape pages automatically get a wider reading area while keeping the page list and status panel stable.
-
-## Usage
-
-After installation just run the binary
-
-```shell
 manga-tui
 ```
 
-### Local manga
+By default the app opens:
 
-Local manga is opened with `--local <path>` and has priority over the configured online provider.
-
-```shell
-manga-tui --local ~/Manga
-manga-tui --local ~/Manga/Series
-manga-tui --local ~/Manga/one-shot.cbz
-manga-tui --local ~/Manga/volume.cbr
+```text
+/home/user/Videos/mangas
 ```
 
-Supported layouts:
+Override the library path with either:
 
-- A folder of images, a single CBZ, or a single CBR is treated as one manga with one chapter.
-- A folder of chapter folders or chapter archives is treated as one manga.
-- A folder of manga folders is treated as a local library.
-- `cover.jpg`, `cover.png`, `cover.webp`, and other supported image extensions are used as manga covers when present; otherwise the first page is used.
+```sh
+manga-tui --local /path/to/manga-library
+MANGA_TUI_LIBRARY_DIR=/path/to/manga-library manga-tui
+```
 
-### Key bindings
+## Local Library Layouts
+
+Supported inputs:
+
+- A folder of images: one manga, one chapter.
+- A single `.cbz`, `.zip`, `.cbr`, `.rar`, or `.epub`: one manga, one chapter.
+- A folder of chapter folders or chapter archives: one manga.
+- A folder of manga folders: one library.
+
+Cover detection:
+
+- `cover.jpg`, `cover.png`, `cover.webp`, and other supported image extensions are used when present.
+- If no cover file exists, the first page of the first chapter is used.
+
+## In-App Library Selection
+
+Open the Stats tab with:
+
+```text
+gt
+```
+
+Then:
+
+- `e`: edit the local library path.
+- `Enter`: reload the typed path.
+- `Esc`: cancel path editing.
+- `r`: reload the current path.
+
+Reloading swaps the shared local index and clears stale Library/Search/Manga/Reader state.
+
+## Key Bindings
 
 | Area | Keys |
 | --- | --- |
-| App navigation | `gh` home, `gs` search, `gf` feed, `q` quit |
+| App | `gh` Library, `gs` Search, `gt` Stats, `q` quit |
 | Lists | `j`/`k` move down/up, `Enter`/`l` open |
-| Search bars | `/` focus, `Enter` search, `Esc` stop typing |
+| Search | `/` type, `Enter` search, `Esc` stop typing |
 | Pagination | `Ctrl-d` next page, `Ctrl-u` previous page |
-| Manga page | `L` languages, `B` read bookmarked chapter, `m` bookmark, `d` download chapter, `a` download all |
+| Manga page | `Enter`/`l` read, `B` read bookmarked, `m` bookmark, `d` download chapter, `a` download all |
 | Reader | `j`/`l` next page, `k`/`h` previous page, `n` next chapter, `N` previous chapter, `q`/`Backspace` exit |
 | Confirm dialogs | `y` confirm, `n`/`q`/`Esc` cancel |
 
-## Manga providers
+## Image Rendering
 
-> [!WARNING]
-> Expect any manga provider to fail at some point, either due to them closing operations due to a [lawsuit](https://www.japantimes.co.jp/news/2024/04/18/japan/crime-legal/manga-mura-copyright-ruling/) or the provider itself having issues on their end like [manganato](https://github.com/josueBarretogit/manga-tui/issues/132)
-
-By default when you run `manga-tui` Mangadex will be used
-
-```shell
-manga-tui
-```
-
-If you want to use Weebcentral or any other provider available then run:
-
-```shell
-manga-tui -p weebcentral
-```
-
-For local manga, use `--local <path>` instead of `-p local` because the local provider needs a filesystem path.
+Use a terminal with inline image support for the reader. If the terminal does not support inline images, the app still opens and can browse/search/download local manga, but the reader will show an inline-image support error when opening a chapter.
 
 ## Configuration
 
-The config file is located at `XDG_CONFIG_HOME/manga-tui/config.toml`, to know where it is you can run:
+Print the config directory:
 
-```shell
-manga-tui --config-dir 
-
-# or
-
-manga-tui -c
+```sh
+manga-tui --config-dir
 ```
 
-Which provides the following configuration:
+Default config:
 
 ```toml
-# The format of the manga downloaded
-# values: cbz, raw, epub, pdf
-# default: "cbz"
 download_type = "cbz"
-
-# Download image quality, low quality means images are compressed and is recommended for slow internet connections
-# values: low, high 
-# default: "low"
 image_quality = "low"
-
-# Pages around the currently selected page to try to prefetch
-# values: 0-255
-# default: 5
 amount_pages = 5
-
-# Whether or not bookmarking is done automatically, if false you decide which chapter to bookmark
-# values: true, false
-# default: true
 auto_bookmark = true
-
-# Whether or not downloading a manga counts as reading it on services like anilist
-# values: true, false
-# default: false
-track_reading_when_download = false
-
-# Enable / disable checking for new updates
-# values: true, false
-# default: true
-check_new_updates = true
-
-# Sets which manga provider will be used when running manga-tui, 
-# you can override it by running manga-tui with the -p flag like this: manga-tui -p weebcentral
-# values: mangadex, weebcentral, mangapill
-# default: "mangadex"
-default_manga_provider = "mangadex"
-
-# Enable / disable tracking reading history with services like `anilist`
-# values: true, false
-# default: true
-track_reading_history = true
-
-# Anilist-related config, if you want `manga-tui` to read your anilist credentials from this file then place them here
-[anilist]
-# Your client id from your anilist account
-# leave it as an empty string "" if you don't want to use the config file to read your anilist credentials
-# values: string
-# default: ""
-client_id = ""
-
-# Your acces token from your anilist account
-# leave it as an empty string "" if you don't want to use the config file to read your anilist credentials
-# values: string
-# default: ""
-access_token = ""
 ```
 
-Manga downloads and reading history is stored in the `manga-tui` directory, to know where it is run:
+Print the data directory:
 
-```shell
-manga-tui --data-dir 
-
-# or
-
-manga-tui -d
+```sh
+manga-tui --data-dir
 ```
 
-On linux it will output something like: `~/.local/share/manga-tui` <br />
+Data directories:
 
-On the `manga-tui` directory there will be 3 directories
+- `history`: SQLite reading history/bookmarks.
+- `mangaDownloads`: downloaded chapters.
+- `errorLogs`: error log files.
 
-- `history`, which contains a sqlite database to store reading history
-- `mangaDownloads`, where manga will be downloaded
-- `errorLogs`, for storing posible errors / bugs
+Override the data directory with:
 
-If you want to change the location of this directory you can set the environment variable `MANGA_TUI_DATA_DIR` to some path pointing to a directory, like: <br />
-
-```shell
-export MANGA_TUI_DATA_DIR="/home/user/Desktop/mangas"
+```sh
+export MANGA_TUI_DATA_DIR="/path/to/manga-tui-data"
 ```
 
-> [!NOTE]
-> Mangadex-only feature
-By default `manga-tui` will search mangas in english, you can change the language by running:
+## Development
 
-```shell
-# `es` corresponds to the Iso code for spanish
-manga-tui lang --set 'es'
+Useful verification commands:
+
+```sh
+cargo fmt
+cargo check
+cargo test --all-targets
+MANGA_TUI_TEST_LIBRARY_DIR=/home/user/Videos/mangas cargo test scans_configured_local_library -- --ignored --nocapture
 ```
-
-> [!NOTE]
-> Mangadex-only feature
-Check the available languages and their Iso codes by running:
-
-```shell
-manga-tui lang --print
-```
-
-## Motivation
-
-I wanted to make a "How linux user does ..." but for manga, [here is the video](https://www.youtube.com/watch?v=K0FsGRqEc1c) also this is a great excuse to start reading manga again
-
-## Credits
-
-Many thanks to Mangadex for providing the free API please consider supporting them ❤️  <br />
-Many thanks to the [Ratatui organization](https://github.com/ratatui-org) for making such a good library for making TUI's in rust 🐭 <br />
-Many thanks to the developer of the [Ratatui-image crate](https://crates.io/crates/ratatui-image) for providing a widget that renders images in the terminal 🖼️ <br />
-
-Consider giving a star to this project ⭐

@@ -9,13 +9,12 @@ use bytes::Bytes;
 use chrono::NaiveDate;
 use image::{DynamicImage, GenericImageView, ImageReader};
 use manga_tui::{SearchTerm, SortedVec};
-use mangadex::filters::filter_provider::FilterListItem;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::Span;
-use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
+use url::Url;
 
 use super::database::ChapterBookmarked;
 use super::tui::Events;
@@ -23,11 +22,7 @@ use crate::config::ImageQuality;
 use crate::global::PREFERRED_LANGUAGE;
 use crate::view::widgets::StatefulWidgetFrame;
 
-pub mod filters;
 pub mod local;
-pub mod mangadex;
-pub mod mangapill;
-pub mod weebcentral;
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum Rating {
@@ -49,9 +44,7 @@ impl Rating {
     }
 }
 
-/// Genres of manga, providers like `mangadex` call them "tags" and other data about the manga may
-/// be considered a genre, like the content rating ("safe, suggestive") and publication demographic
-/// ("shounen, seinen")
+/// Genres and metadata attached to a manga.
 /// the genre needs to be categorized by the `Rating`, a genre named `comedy` is considered normal,
 /// `ecchi` is moderate, and stuff like `smut` or `gore` are to be considered nsfw
 #[derive(Debug, Default, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -73,10 +66,8 @@ impl From<Genres> for Span<'_> {
     }
 }
 
-/// Represents manga which are popular in the week/month like the ones from the homepage of
-/// mangadex https://mangadex.org/
-/// most manga providers wont provide info such as description, status or genres, like `manganato` its fine to leave
-/// them empty to avoid making many requests
+/// Represents manga highlighted on the Library page.
+/// Local metadata may omit description, status, or genres.
 #[derive(Debug, Default, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct PopularManga {
     pub id: String,
@@ -116,7 +107,7 @@ impl From<MangaStatus> for Span<'_> {
     }
 }
 
-/// NOTE this is very mangadex-specifc since its the only provider that provides a lot of languages
+/// NOTE this is very local-specifc since its the only provider that provides a lot of languages
 #[derive(Debug, Display, EnumIter, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Languages {
     French,
@@ -159,14 +150,6 @@ pub enum Languages {
     Persian,
     // Some language that is missing from this `list`
     Unkown,
-}
-
-impl From<FilterListItem> for Languages {
-    fn from(value: FilterListItem) -> Self {
-        Self::iter()
-            .find(|lang| value.name == format!("{} {}", lang.as_emoji(), lang.as_human_readable()))
-            .unwrap_or_default()
-    }
 }
 
 impl Languages {
@@ -279,9 +262,7 @@ pub struct Artist {
 #[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Manga {
     pub id: String,
-    /// This is necessary because on mangadex ids are Uuids which are safe to be used in file
-    /// names, but when the manga providers is a website the id cannot be a url, like `https://chapmanganato.to/manga-zt1003076/chapter-11`
-    /// so this is only intended to be used when downloading a manga
+    /// Filesystem-safe id used when downloading a manga.
     pub id_safe_for_download: String,
     pub title: String,
     pub genres: Vec<Genres>,
@@ -316,9 +297,7 @@ pub struct SearchManga {
 #[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Chapter {
     pub id: String,
-    /// This is necessary because on mangadex ids are Uuids which are safe to be used in file
-    /// names, but when the manga providers is a website the id cannot be a url, like `https://chapmanganato.to/manga-zt1003076/chapter-11`
-    /// so this is only intended to be used when downloading a chapter
+    /// Filesystem-safe id used when downloading a chapter.
     pub id_safe_for_download: String,
     pub manga_id: String,
     pub title: String,
@@ -654,20 +633,11 @@ pub struct ChapterPageUrl {
     pub extension: String,
 }
 
-/// This enum has two purposes:
-/// 1. determine which manga provider to use when running manga-tui
-/// 2. apply specific configuration for each provider, for example `manganato` provides larger paginations sizes than `mangadex`
-///    since `mangadex` has been the first manga provider it is the default
+/// Local manga source identifier used for persisted history and bookmarks.
 #[derive(Debug, Clone, Copy, Display, Default, clap::ValueEnum, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MangaProviders {
     #[default]
-    #[strum(to_string = "mangadex")]
-    Mangadex,
-    #[strum(to_string = "weebcentral")]
-    Weebcentral,
-    #[strum(to_string = "mangapill")]
-    Mangapill,
     #[strum(to_string = "local")]
     Local,
 }
@@ -846,10 +816,7 @@ pub trait ProviderIdentity {
     fn name(&self) -> MangaProviders;
 }
 
-/// Preferer manga providers which provide an api like `mangadex`, when scraping from a website
-/// prefer ones that are server-side rendered, I should be able to `curl https://example./// >>
-/// example.html` and get juicy scrapable html document since client-side rendered website are much
-/// harder to scrape
+/// Shared behavior required by the local library, manga page, search, stats, and reader views.
 pub trait MangaProvider:
     HomePageMangaProvider + MangaPageProvider + SearchPageProvider + ReaderPageProvider + FeedPageProvider + Send + Sync
 {
@@ -1072,7 +1039,7 @@ pub mod mock {
 
     impl ProviderIdentity for MockMangaPageProvider {
         fn name(&self) -> MangaProviders {
-            MangaProviders::Mangadex
+            MangaProviders::Local
         }
     }
 
