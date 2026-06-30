@@ -238,7 +238,7 @@ where
             InputMode::Idle => Line::from(vec![
                 "Press ".into(),
                 "</>".to_span().style(*INSTRUCTIONS_STYLE),
-                " to search mangas ".into(),
+                " to search local manga ".into(),
                 "<f>".to_span().style(*INSTRUCTIONS_STYLE),
                 " to open advanced filters".into(),
             ]),
@@ -277,7 +277,7 @@ where
             },
             PageState::SearchingMangas => {
                 let loader = Throbber::default()
-                    .label("Searching mangas")
+                    .label("Searching local library")
                     .style(Style::default().fg(Color::Yellow))
                     .throbber_set(throbber_widgets_tui::BRAILLE_SIX)
                     .use_type(throbber_widgets_tui::WhichUse::Spin);
@@ -285,11 +285,15 @@ where
                 StatefulWidget::render(loader, area, buf, &mut self.loader_state);
             },
             PageState::NotFound => {
-                Block::bordered().title("No mangas were found").render(area, buf);
+                Block::bordered().title("No local manga was found").render(area, buf);
             },
             PageState::ErrorOcurredSearchingMangas => {
                 Block::bordered()
-                    .title("An error ocurred when searching mangas, please try again".to_span().style(*ERROR_STYLE))
+                    .title(
+                        "An error ocurred when searching local manga, please try again"
+                            .to_span()
+                            .style(*ERROR_STYLE),
+                    )
                     .render(area, buf);
             },
             PageState::DisplayingMangasFound => {

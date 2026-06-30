@@ -170,7 +170,7 @@ where
         ]);
 
         Block::bordered()
-            .title(Line::from(vec!["Popular new titles".bold()]))
+            .title(Line::from(vec!["Local library".bold()]))
             .title_bottom(instructions)
             .render(area, buf);
 
@@ -394,7 +394,7 @@ where
         });
 
         let instructions = Line::from(vec![
-            "Recently added mangas | ".into(),
+            "Recently indexed | ".into(),
             "Move right ".into(),
             Span::raw("<l>").style(*INSTRUCTIONS_STYLE),
             " Move left ".into(),
@@ -416,8 +416,8 @@ where
         Widget::render(
             List::new([
                 Line::from(vec![format!("Manga-tui V{}", env!("CARGO_PKG_VERSION")).into()]),
-                Line::from(vec![format!("Mode: {}", self.manga_provider.name()).into()]),
-                Line::from(vec!["Offline local library".into()]),
+                Line::from(vec!["Mode: local".into()]),
+                Line::from(vec!["Offline library".into()]),
             ]),
             layout[0],
             buf,
