@@ -28,7 +28,8 @@ pub enum Events {
     GoBackMangaPage,
     GoToHome,
     GoSearchPage,
-    GoFeedPage,
+    GoStatsPage,
+    LocalLibraryReloaded,
     Error(String),
     ReadChapter(ChapterToRead, MangaToRead),
 }

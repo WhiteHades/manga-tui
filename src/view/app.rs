@@ -9,13 +9,13 @@ use ratatui::widgets::{Block, Borders, Tabs, Widget};
 use ratatui_image::picker::Picker;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use self::feed::Feed;
 use self::home::Home;
 use self::manga::MangaPage;
 use self::reader::MangaReader;
 use self::search::{InputMode, SearchPage};
+use self::stats::StatsPage;
 use super::widgets::Component;
-use crate::backend::manga_provider::{ChapterToRead, ListOfChapters, Manga, MangaProvider, MangaProviders, Pagination};
+use crate::backend::manga_provider::{ChapterToRead, ListOfChapters, Manga, MangaProvider, Pagination};
 use crate::backend::tracker::MangaTracker;
 use crate::backend::tui::{Action, Events};
 use crate::config::MangaTuiConfig;
@@ -54,7 +54,7 @@ where
     pub manga_reader_page: Option<MangaReader<T, S>>,
     pub search_page: SearchPage<T, S>,
     pub home_page: Home<T>,
-    pub feed_page: Feed<T>,
+    pub stats_page: StatsPage<T>,
     manga_provider: Arc<T>,
     manga_tracker: Option<S>,
     error_message: Option<String>,
@@ -103,7 +103,8 @@ where
                 self.go_search_page();
             },
             Events::GoToHome => self.go_to_home(),
-            Events::GoFeedPage => self.go_feed_page(),
+            Events::GoStatsPage => self.go_stats_page(),
+            Events::LocalLibraryReloaded => self.local_library_reloaded(),
 
             Events::Error(message) => self.display_error_message(message),
 
@@ -145,8 +146,6 @@ where
 
         global_event_tx.send(Events::GoToHome).ok();
 
-        let which_provider = api_client.name();
-
         let provider = Arc::new(api_client);
 
         App {
@@ -158,17 +157,10 @@ where
                 manga_tracker.clone(),
                 filters_state,
                 filter_widget,
-                Pagination::from_first_page(match which_provider {
-                    MangaProviders::Mangadex => 10,
-                    MangaProviders::Weebcentral => 24,
-                    MangaProviders::Mangapill => 50,
-                    MangaProviders::Local => 16,
-                }),
+                Pagination::from_first_page(16),
             )
             .with_global_sender(global_event_tx.clone()),
-            feed_page: Feed::new()
-                .with_global_sender(global_event_tx.clone())
-                .with_api_client(Arc::clone(&provider)),
+            stats_page: StatsPage::new(Arc::clone(&provider)).with_global_sender(global_event_tx.clone()),
             home_page: Home::new(picker, Arc::clone(&provider)).with_global_sender(global_event_tx.clone()),
             manga_page: None,
             manga_reader_page: None,
@@ -185,18 +177,14 @@ where
     }
 
     pub fn render_top_tabs(&self, area: Rect, buf: &mut Buffer) {
-        let mut titles: Vec<&str> = if self.manga_provider.name() == MangaProviders::Local {
-            vec!["Home <gh> [Local]", "Search <gs> [Local]", "Feed <gf> [Local]"]
-        } else {
-            vec!["Home <gh>", "Search <gs>", "Feed <gf>"]
-        };
+        let mut titles: Vec<&str> = vec!["Library <gh>", "Search <gs>", "Stats <gt>"];
 
         let tabs_block = Block::default().borders(Borders::BOTTOM);
 
         let index_current_tab = match self.current_tab {
             SelectedPage::Home => 0,
             SelectedPage::Search => 1,
-            SelectedPage::Feed => 2,
+            SelectedPage::Stats => 2,
             SelectedPage::MangaTab => {
                 titles.push(" 📖 Manga page");
                 3
@@ -234,14 +222,14 @@ where
             SelectedPage::Search => self.render_search_page(area, frame),
             SelectedPage::MangaTab => self.render_manga_page(area, frame),
             SelectedPage::Home => self.render_home_page(area, frame),
-            SelectedPage::Feed => self.render_feed_page(area, frame),
+            SelectedPage::Stats => self.render_stats_page(area, frame),
             // Reader tab should be on full screen
             SelectedPage::ReaderTab => {},
         }
     }
 
-    fn render_feed_page(&mut self, area: Rect, frame: &mut Frame<'_>) {
-        self.feed_page.render(area, frame);
+    fn render_stats_page(&mut self, area: Rect, frame: &mut Frame<'_>) {
+        self.stats_page.render(area, frame);
     }
 
     pub fn render_search_page(&mut self, area: Rect, frame: &mut Frame<'_>) {
@@ -294,7 +282,7 @@ where
         if self.current_tab != SelectedPage::ReaderTab
             && self.search_page.input_mode != InputMode::Typing
             && !self.search_page.is_typing_filter()
-            && !self.feed_page.is_typing()
+            && !self.stats_page.is_typing()
         {
             if self.pending_goto_prefix {
                 self.pending_goto_prefix = false;
@@ -312,9 +300,9 @@ where
                         }
                         return true;
                     },
-                    KeyCode::Char('f') => {
+                    KeyCode::Char('t') => {
                         if self.current_tab != SelectedPage::ReaderTab {
-                            self.global_event_tx.send(Events::GoFeedPage).ok();
+                            self.global_event_tx.send(Events::GoStatsPage).ok();
                         }
                         return true;
                     },
@@ -345,7 +333,7 @@ where
             self.manga_page.as_mut().unwrap().clean_up();
             self.manga_page = None;
         }
-        self.feed_page.clean_up();
+        self.stats_page.clean_up();
         self.current_tab = SelectedPage::Search;
     }
 
@@ -355,7 +343,7 @@ where
             self.manga_reader_page = None;
         }
 
-        self.feed_page.clean_up();
+        self.stats_page.clean_up();
 
         self.current_tab = SelectedPage::MangaTab;
 
@@ -378,7 +366,7 @@ where
         };
 
         self.home_page.clean_up();
-        self.feed_page.clean_up();
+        self.stats_page.clean_up();
         self.current_tab = SelectedPage::ReaderTab;
 
         let mut manga_reader = MangaReader::new(chapter_to_read, manga_to_read.manga_id, picker, Arc::clone(&self.manga_provider))
@@ -404,7 +392,7 @@ where
             self.manga_page = None;
         }
 
-        self.feed_page.clean_up();
+        self.stats_page.clean_up();
 
         if self.home_page.require_search() {
             self.home_page.init_search();
@@ -413,13 +401,28 @@ where
         self.current_tab = SelectedPage::Home;
     }
 
-    fn go_feed_page(&mut self) {
+    fn go_stats_page(&mut self) {
         if self.manga_page.is_some() {
             self.manga_page.as_mut().unwrap().clean_up();
             self.manga_page = None;
         }
-        self.feed_page.init_search();
-        self.current_tab = SelectedPage::Feed;
+        self.current_tab = SelectedPage::Stats;
+    }
+
+    fn local_library_reloaded(&mut self) {
+        self.home_page.clean_up();
+        self.search_page.clean_up();
+
+        if let Some(manga_page) = self.manga_page.as_mut() {
+            manga_page.clean_up();
+        }
+        self.manga_page = None;
+
+        if let Some(reader_page) = self.manga_reader_page.as_mut() {
+            reader_page.clean_up();
+        }
+        self.manga_reader_page = None;
+        self.current_tab = SelectedPage::Stats;
     }
 
     pub async fn listen_to_event(&mut self) {
@@ -454,8 +457,8 @@ where
                 SelectedPage::Home => {
                     self.home_page.handle_events(event);
                 },
-                SelectedPage::Feed => {
-                    self.feed_page.handle_events(event);
+                SelectedPage::Stats => {
+                    self.stats_page.handle_events(event);
                 },
             };
         }
@@ -491,9 +494,9 @@ where
                     self.home_page.update(home_action);
                 }
             },
-            SelectedPage::Feed => {
-                if let Ok(feed_event) = self.feed_page.local_action_rx.try_recv() {
-                    self.feed_page.update(feed_event);
+            SelectedPage::Stats => {
+                if let Ok(stats_action) = self.stats_page.local_action_rx.try_recv() {
+                    self.stats_page.update(stats_action);
                 }
             },
         };
@@ -576,16 +579,16 @@ mod tests {
     }
 
     #[test]
-    fn can_go_to_feed_by_pressing_gf() {
+    fn can_go_to_stats_by_pressing_gt() {
         let mut app: App<MockMangaPageProvider, TrackerTest> =
             App::new(MockMangaPageProvider::new(), None, None, MockFiltersHandler::new(MockFilterState {}), MockWidgetFilter {});
 
         press_key(&mut app, KeyCode::Char('g'));
-        press_key(&mut app, KeyCode::Char('f'));
+        press_key(&mut app, KeyCode::Char('t'));
 
         tick(&mut app);
 
-        assert_eq!(app.current_tab, SelectedPage::Feed);
+        assert_eq!(app.current_tab, SelectedPage::Stats);
     }
 
     #[test]
