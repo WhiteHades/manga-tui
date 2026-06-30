@@ -4,7 +4,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::widgets::{Block, Paragraph, StatefulWidget, Widget, Wrap};
 use throbber_widgets_tui::{Throbber, ThrobberState};
-use tui_widget_list::PreRender;
+use tui_widget_list::{ListBuilder, ListView};
 
 use crate::global::CURRENT_LIST_ITEM_STYLE;
 
@@ -64,15 +64,6 @@ impl Widget for PagesItem {
                 Paragraph::new("💤").wrap(Wrap { trim: true }).bold().render(loader_area, buf);
             },
         }
-    }
-}
-
-impl PreRender for PagesItem {
-    fn pre_render(&mut self, context: &tui_widget_list::PreRenderContext) -> u16 {
-        if context.is_selected {
-            self.style = *CURRENT_LIST_ITEM_STYLE;
-        }
-        2
     }
 }
 
@@ -151,7 +142,16 @@ impl StatefulWidget for PagesList {
             self.highlight_page_as_bookmarked(page);
         }
 
-        let items = tui_widget_list::List::new(self.pages);
+        let pages = self.pages;
+        let item_count = pages.len();
+        let builder = ListBuilder::new(move |context| {
+            let mut page = pages[context.index].clone();
+            if context.is_selected {
+                page.style = *CURRENT_LIST_ITEM_STYLE;
+            }
+            (page, 1)
+        });
+        let items = ListView::new(builder, item_count);
 
         StatefulWidget::render(items, area, buf, &mut state.list_state)
     }

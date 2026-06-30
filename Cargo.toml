@@ -18,11 +18,11 @@ exclude = [
 
 [dependencies]
 # ratatui related dependencies
-ratatui = { version = "0.29.0", features = ["all-widgets", "palette", "unstable-widget-ref"] }
-ratatui-image = { version = "1.0.5", features = ["rustix"]}
-throbber-widgets-tui = "0.9.0"
-tui-input = { version = "0.14.0",  features = ["crossterm"], default-features = false}
-tui-widget-list = "0.13.0"
+ratatui = { version = "0.30.2", features = ["all-widgets", "palette", "unstable-widget-ref"] }
+ratatui-image = { version = "11.0.6", features = ["crossterm", "image-defaults"], default-features = false }
+throbber-widgets-tui = "0.11.1"
+tui-input = { version = "0.15.3", features = ["crossterm"], default-features = false }
+tui-widget-list = "0.15.2"
 
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 directories = "6.0.0"
@@ -53,6 +53,8 @@ regex = "1.12.2"
 lopdf = "0.38.0"
 flate2 = "1.1.4"
 rand = "0.9.2"
+time = "=0.3.51"
+rars = "0.3.1"
 
 [dev-dependencies]
 httpmock = "0.7.0-rc.1"

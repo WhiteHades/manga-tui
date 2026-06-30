@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::future::Future;
 use std::io::BufRead;
+use std::path::PathBuf;
 use std::process::exit;
 
 use clap::{Parser, Subcommand, crate_version};
@@ -60,6 +61,9 @@ pub struct CliArgs {
     pub config_dir: bool,
     #[arg(short = 'p', long = "provider")]
     pub manga_provider: Option<MangaProviders>,
+    /// Read a local manga library, image folder, CBZ, or CBR.
+    #[arg(short = 'l', long = "local", value_name = "PATH")]
+    pub local: Option<PathBuf>,
 }
 
 pub struct AnilistCredentialsProvided<'a> {
@@ -119,6 +123,7 @@ impl CliArgs {
             config_dir: false,
             command: None,
             data_dir: false,
+            local: None,
             manga_provider: Some(MangaProviders::default()),
         }
     }

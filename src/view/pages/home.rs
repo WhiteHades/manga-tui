@@ -159,11 +159,11 @@ where
 
         let instructions = Line::from(vec![
             "Next ".into(),
-            Span::raw("<w>").style(*INSTRUCTIONS_STYLE),
+            Span::raw("<j>").style(*INSTRUCTIONS_STYLE),
             " previous ".into(),
-            Span::raw("<b>").style(*INSTRUCTIONS_STYLE),
-            " read ".into(),
-            Span::raw("<r>").style(*INSTRUCTIONS_STYLE),
+            Span::raw("<k>").style(*INSTRUCTIONS_STYLE),
+            " open ".into(),
+            Span::raw("<o>").style(*INSTRUCTIONS_STYLE),
             format!(
                 " No.{} Total : {}",
                 self.carrousel_popular_mangas.current_item_visible_index,
@@ -278,7 +278,8 @@ where
         if let Some(cover) = maybe_cover
             && let Some(picker) = self.picker.as_mut()
         {
-            let fixed_protocol = picker.new_protocol(cover, self.popular_manga_carrousel_state.get_img_area(), Resize::Fit(None));
+            let fixed_protocol =
+                picker.new_protocol(cover, self.popular_manga_carrousel_state.get_img_area().into(), Resize::Fit(None));
             if let Ok(protocol) = fixed_protocol {
                 self.popular_manga_carrousel_state.insert_manga(protocol, id);
             }
@@ -375,7 +376,8 @@ where
         if let Some(cover) = maybe_cover
             && let Some(picker) = self.picker.as_mut()
         {
-            let fixed_protocol = picker.new_protocol(cover, self.recently_added_manga_state.get_img_area(), Resize::Fit(None));
+            let fixed_protocol =
+                picker.new_protocol(cover, self.recently_added_manga_state.get_img_area().into(), Resize::Fit(None));
 
             if let Ok(protocol) = fixed_protocol {
                 self.recently_added_manga_state.insert_manga(protocol, id);
@@ -422,7 +424,7 @@ where
             List::new([
                 Line::from(vec![format!("Manga-tui V{}", env!("CARGO_PKG_VERSION")).into()]),
                 Line::from(vec![format!("Using: {}", self.manga_provider.name()).into()]),
-                Line::from(vec!["Support this project ".into(), "<g>".to_span().style(*INSTRUCTIONS_STYLE)]),
+                Line::from(vec!["Support this project ".into(), "<?>".to_span().style(*INSTRUCTIONS_STYLE)]),
             ]),
             layout[0],
             buf,
@@ -431,14 +433,14 @@ where
 
     pub fn handle_key_events(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Char('w') => {
+            KeyCode::Char('j') | KeyCode::Down => {
                 self.local_action_tx.send(HomeActions::SelectNextPopularManga).ok();
             },
 
-            KeyCode::Char('b') => {
+            KeyCode::Char('k') | KeyCode::Up => {
                 self.local_action_tx.send(HomeActions::SelectPreviousPopularManga).ok();
             },
-            KeyCode::Char('r') => {
+            KeyCode::Char('o') => {
                 self.local_action_tx.send(HomeActions::GoToPopularMangaPage).ok();
             },
             KeyCode::Char('l') | KeyCode::Right => {
@@ -450,7 +452,7 @@ where
             KeyCode::Enter => {
                 self.local_action_tx.send(HomeActions::GoToRecentlyAddedMangaPage).ok();
             },
-            KeyCode::Char('g') => {
+            KeyCode::Char('?') => {
                 self.local_action_tx.send(HomeActions::SupportProject).ok();
             },
             _ => {},
@@ -467,7 +469,7 @@ mod tests {
 
     #[test]
     fn searches_popular_manga_cover_after_mangas_are_loaded_if_picker_is_some() {
-        let mut home: Home<MockMangaPageProvider> = Home::new(Some(Picker::new((8, 8))), MockMangaPageProvider::new().into());
+        let mut home: Home<MockMangaPageProvider> = Home::new(Some(Picker::halfblocks()), MockMangaPageProvider::new().into());
 
         home.load_popular_mangas(Some(vec![PopularManga::default()]));
 
@@ -477,7 +479,7 @@ mod tests {
     }
     #[test]
     fn searches_recently_added_manga_cover_after_mangas_are_loaded_if_picker_is_some() {
-        let mut home: Home<MockMangaPageProvider> = Home::new(Some(Picker::new((8, 8))), MockMangaPageProvider::new().into());
+        let mut home: Home<MockMangaPageProvider> = Home::new(Some(Picker::halfblocks()), MockMangaPageProvider::new().into());
 
         home.load_recently_added_mangas(Some(vec![RecentlyAddedManga::default()]));
 

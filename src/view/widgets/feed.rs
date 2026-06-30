@@ -6,7 +6,7 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, StatefulWidget, Widget, WidgetRef, Wrap};
-use tui_widget_list::PreRender;
+use tui_widget_list::{ListBuilder, ListView};
 
 use crate::backend::database::MangaHistoryResponse;
 use crate::backend::manga_provider::{Languages, LatestChapter, MangaProviders};
@@ -123,15 +123,6 @@ impl Widget for MangasRead {
     }
 }
 
-impl PreRender for MangasRead {
-    fn pre_render(&mut self, context: &tui_widget_list::PreRenderContext) -> u16 {
-        if context.is_selected {
-            self.style = *CURRENT_LIST_ITEM_STYLE;
-        }
-        10
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct HistoryWidget {
     pub page: u32,
@@ -207,9 +198,11 @@ impl HistoryWidget {
             self.total_results.to_string().into(),
             format!(" page : {} of {} ", self.page, amount_pages.ceil()).into(),
             " Next page: ".into(),
-            " <w> ".bold().fg(Color::Yellow),
+            " <C-d> ".bold().fg(Color::Yellow),
             " Previous page: ".into(),
-            " <b> ".bold().fg(Color::Yellow),
+            " <C-u> ".bold().fg(Color::Yellow),
+            " Open: ".into(),
+            " <Enter>/<l> ".bold().fg(Color::Yellow),
             " Delete current manga: ".into(),
             " <d> ".bold().fg(Color::Red),
             " Delete all history: ".into(),
@@ -227,7 +220,16 @@ impl StatefulWidget for HistoryWidget {
         let [total_results_area, list_area] = layout.areas(area);
 
         self.render_pagination_data_and_instructions(total_results_area, buf);
-        let list = tui_widget_list::List::new(self.mangas);
+        let mangas = self.mangas;
+        let item_count = mangas.len();
+        let builder = ListBuilder::new(move |context| {
+            let mut manga = mangas[context.index].clone();
+            if context.is_selected {
+                manga.style = *CURRENT_LIST_ITEM_STYLE;
+            }
+            (manga, 10)
+        });
+        let list = ListView::new(builder, item_count);
         StatefulWidget::render(list, list_area, buf, state);
     }
 }
@@ -258,8 +260,8 @@ impl WidgetRef for AskConfirmationDeleteAllModalBody {
 
         let as_list = List::new(Line::from(vec![
             "Your reading history and download status will still be kept but not from this `Feed` page".into(),
-            "Yes: <w>".bold().fg(Color::Red),
-            "No: <q>".bold().fg(Color::Green),
+            "Yes: <y>/<Enter>".bold().fg(Color::Red),
+            "No: <n>/<q>/<Esc>".bold().fg(Color::Green),
         ]));
 
         Widget::render(as_list, options_area, buf);

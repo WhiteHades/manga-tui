@@ -34,7 +34,7 @@ impl CarrouselItemPopularManga {
     fn render_cover(&mut self, area: Rect, buf: &mut Buffer, state: &mut ImageState) {
         match state.get_image_state(&self.manga.id) {
             Some(image_state) => {
-                let cover = Image::new(image_state.as_ref());
+                let cover = Image::new(&*image_state);
                 Widget::render(cover, area, buf);
             },
             None => {
@@ -175,7 +175,7 @@ impl CarrouselItemRecentlyAddedManga {
     fn render_cover(&mut self, area: Rect, buf: &mut Buffer, state: &mut ImageState) {
         match state.get_image_state(&self.manga.id) {
             Some(image_state) => {
-                let cover = Image::new(image_state.as_ref());
+                let cover = Image::new(&*image_state);
                 Widget::render(cover, area, buf);
             },
             None => {

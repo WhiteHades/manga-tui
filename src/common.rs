@@ -7,12 +7,12 @@ use ratatui_image::protocol::Protocol;
 #[derive(Default)]
 pub struct ImageState {
     /// save the image loaded for a manga, it will be retrieved by it's id
-    image_state: HashMap<String, Box<dyn Protocol>>,
+    image_state: HashMap<String, Protocol>,
     img_area: Rect,
 }
 
 impl ImageState {
-    pub fn insert_manga(&mut self, fixed_protocol: Box<dyn Protocol>, id_manga: String) {
+    pub fn insert_manga(&mut self, fixed_protocol: Protocol, id_manga: String) {
         self.image_state.insert(id_manga, fixed_protocol);
     }
 
@@ -26,7 +26,7 @@ impl ImageState {
     }
 
     /// get the image cover state given the manga id
-    pub fn get_image_state(&mut self, id: &str) -> Option<&mut Box<dyn Protocol>> {
+    pub fn get_image_state(&mut self, id: &str) -> Option<&mut Protocol> {
         self.image_state.get_mut(id)
     }
 

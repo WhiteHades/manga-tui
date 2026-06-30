@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
 
-use crossterm::event::{self, KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use image::DynamicImage;
 use manga_tui::SearchTerm;
 use ratatui::Frame;
@@ -237,7 +237,7 @@ where
         let input_help = match self.input_mode {
             InputMode::Idle => Line::from(vec![
                 "Press ".into(),
-                "<s>".to_span().style(*INSTRUCTIONS_STYLE),
+                "</>".to_span().style(*INSTRUCTIONS_STYLE),
                 " to search mangas ".into(),
                 "<f>".to_span().style(*INSTRUCTIONS_STYLE),
                 " to open advanced filters".into(),
@@ -302,8 +302,8 @@ where
                     Span::raw("<k>").style(*INSTRUCTIONS_STYLE),
                     " Plan to read ".into(),
                     Span::raw("<p>").style(*INSTRUCTIONS_STYLE),
-                    " Read ".into(),
-                    Span::raw("<r>").style(*INSTRUCTIONS_STYLE),
+                    " Open ".into(),
+                    Span::raw("<Enter>/<l>").style(*INSTRUCTIONS_STYLE),
                 ]);
 
                 let pagination_instructions = Line::from(vec![
@@ -313,9 +313,9 @@ where
                     )
                     .into(),
                     "Next ".into(),
-                    Span::raw("<w>").style(*INSTRUCTIONS_STYLE),
+                    Span::raw("<C-d>").style(*INSTRUCTIONS_STYLE),
                     " Previous ".into(),
-                    Span::raw("<b>").style(*INSTRUCTIONS_STYLE),
+                    Span::raw("<C-u>").style(*INSTRUCTIONS_STYLE),
                 ]);
 
                 Block::bordered()
@@ -476,7 +476,7 @@ where
     fn handle_key_events(&mut self, key_event: KeyEvent) {
         match self.input_mode {
             InputMode::Idle => match key_event.code {
-                KeyCode::Char('s') => {
+                KeyCode::Char('/') => {
                     self.local_action_tx.send(SearchPageActions::StartTyping).ok();
                 },
                 KeyCode::Char('j') | KeyCode::Down => {
@@ -486,19 +486,19 @@ where
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.local_action_tx.send(SearchPageActions::ScrollUp).ok();
                 },
-                KeyCode::Char('w') => {
+                KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
                     self.local_action_tx.send(SearchPageActions::NextPage).ok();
                 },
                 KeyCode::Char('p') => {
                     self.local_action_tx.send(SearchPageActions::PlanToRead).ok();
                 },
-                KeyCode::Char('b') => {
+                KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
                     self.local_action_tx.send(SearchPageActions::PreviousPage).ok();
                 },
                 KeyCode::Char('f') => {
                     self.local_action_tx.send(SearchPageActions::ToggleFilters).ok();
                 },
-                KeyCode::Char('r') | KeyCode::Enter => {
+                KeyCode::Char('l') | KeyCode::Enter => {
                     self.local_action_tx.send(SearchPageActions::SearchMangaPage).ok();
                 },
 
@@ -648,7 +648,7 @@ where
     fn load_cover(&mut self, maybe_cover: Option<DynamicImage>, manga_id: String) {
         if let Some(cover) = maybe_cover
             && let Some(picker) = self.picker.as_mut()
-            && let Ok(protocol) = picker.new_protocol(cover, self.manga_cover_state.get_img_area(), Resize::Fit(None))
+            && let Ok(protocol) = picker.new_protocol(cover, self.manga_cover_state.get_img_area().into(), Resize::Fit(None))
         {
             self.manga_cover_state.insert_manga(protocol, manga_id);
         }
@@ -687,7 +687,7 @@ mod test {
     //#[tokio::test]
     //async fn search_page_events() {
     //    let mut search_page: SearchPage<MockMangaPageProvider, TrackerTest> = SearchPage::new(
-    //        Some(Picker::new((8, 9))),
+    //        Some(Picker::halfblocks()),
     //        MockMangaPageProvider::new().into(),
     //        None,
     //        MockFiltersHandler::new(MockFilterState {}),
@@ -727,7 +727,7 @@ mod test {
     //#[tokio::test]
     //async fn search_page_key_events() {
     //    let mut search_page: SearchPage<MockMangaPageProvider, TrackerTest> = SearchPage::new(
-    //        Some(Picker::new((8, 9))),
+    //        Some(Picker::halfblocks()),
     //        MockMangaPageProvider::new().into(),
     //        None,
     //        MockFiltersHandler::new(MockFilterState {}),
@@ -851,7 +851,7 @@ mod test {
     //#[test]
     //fn search_manga_cover_if_picker_is_some_after_mangas_were_found() {
     //    let mut search_page: SearchPage<MockMangaPageProvider, TrackerTest> = SearchPage::new(
-    //        Some(Picker::new((8, 9))),
+    //        Some(Picker::halfblocks()),
     //        MockMangaPageProvider::new().into(),
     //        None,
     //        MockFiltersHandler::new(MockFilterState {}),

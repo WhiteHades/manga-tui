@@ -11,6 +11,7 @@ use std::time::Duration;
 use backend::cache::Cacher;
 use backend::cache::in_memory::InMemoryCache;
 use backend::manga_provider::MangaProviders;
+use backend::manga_provider::local::{LocalFilterWidget, LocalFiltersProvider, LocalProvider};
 use backend::manga_provider::mangadex::filter_widget::MangadexFilterWidget;
 use backend::manga_provider::mangadex::filters::filter_provider::MangadexFilterProvider;
 use backend::manga_provider::mangadex::{API_URL_BASE, COVER_IMG_URL_BASE, MangadexClient};
@@ -75,6 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli_args = CliArgs::parse();
 
     let manga_provider_cli = cli_args.manga_provider;
+    let local_path_cli = cli_args.local.clone();
 
     cli_args.proccess_args().await?;
 
@@ -128,9 +130,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cache_provider: Arc<dyn Cacher> = InMemoryCache::init(8);
 
-    let provider = if let Some(pro) = manga_provider_cli { pro } else { config.default_manga_provider };
+    let provider = if local_path_cli.is_some() {
+        MangaProviders::Local
+    } else if let Some(pro) = manga_provider_cli {
+        pro
+    } else {
+        config.default_manga_provider
+    };
 
     match provider {
+        MangaProviders::Local => {
+            let Some(local_path) = local_path_cli else {
+                logger.error("Local provider requires --local <path>".into());
+                exit(1)
+            };
+
+            logger.inform(format!("Using local manga from {}", local_path.display()));
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            run_app(
+                ratatui::init(),
+                LocalProvider::from_path(local_path)?,
+                anilist_client,
+                LocalFiltersProvider::new(),
+                LocalFilterWidget::new(),
+            )
+            .await?;
+        },
         MangaProviders::Mangadex => {
             let mangadex_client =
                 MangadexClient::new(API_URL_BASE.parse().unwrap(), COVER_IMG_URL_BASE.parse().unwrap(), cache_provider)

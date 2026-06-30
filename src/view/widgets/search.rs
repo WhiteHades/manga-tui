@@ -5,7 +5,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph, StatefulWidget, StatefulWidgetRef, Widget, Wrap};
 use ratatui_image::Image;
 use throbber_widgets_tui::{Throbber, ThrobberState};
-use tui_widget_list::PreRender;
+use tui_widget_list::{ListBuilder, ListView};
 
 use crate::backend::manga_provider::{Genres, MangaStatus, SearchManga};
 use crate::common::ImageState;
@@ -53,7 +53,7 @@ impl<'a> MangaPreview<'a> {
 
             match state.get_image_state(self.id) {
                 Some(image_state) => {
-                    let cover = Image::new(image_state.as_ref());
+                    let cover = Image::new(&*image_state);
                     Widget::render(cover, cover_area, buf);
                 },
                 None => {
@@ -141,16 +141,6 @@ impl Widget for MangaItem {
     }
 }
 
-impl PreRender for MangaItem {
-    fn pre_render(&mut self, context: &tui_widget_list::PreRenderContext) -> u16 {
-        if context.is_selected {
-            self.style = *CURRENT_LIST_ITEM_STYLE;
-        }
-
-        1
-    }
-}
-
 impl From<SearchManga> for MangaItem {
     fn from(value: SearchManga) -> Self {
         Self::new(value)
@@ -187,7 +177,16 @@ impl StatefulWidgetRef for ListMangasFoundWidget {
     type State = tui_widget_list::ListState;
 
     fn render_ref(&self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let list = tui_widget_list::List::new(self.mangas.clone());
+        let mangas = self.mangas.clone();
+        let item_count = mangas.len();
+        let builder = ListBuilder::new(move |context| {
+            let mut manga = mangas[context.index].clone();
+            if context.is_selected {
+                manga.style = *CURRENT_LIST_ITEM_STYLE;
+            }
+            (manga, 1)
+        });
+        let list = ListView::new(builder, item_count);
         StatefulWidget::render(list, area, buf, state);
     }
 }

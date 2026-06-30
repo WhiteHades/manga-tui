@@ -62,6 +62,7 @@ where
     // terminal font size and the graphics it supports
     // if the terminal doesn't support any graphics protocol the picker is `None`
     picker: Option<Picker>,
+    pending_goto_prefix: bool,
 }
 
 impl<T, S> Component for App<T, S>
@@ -91,7 +92,9 @@ where
 
     fn handle_events(&mut self, events: Events) {
         match events {
-            Events::Key(key_event) => self.handle_key_events(key_event),
+            Events::Key(key_event) => {
+                self.handle_key_events(key_event);
+            },
             Events::GoToMangaPage(manga) => self.go_to_manga_page(manga),
             Events::ReadChapter(chapter_response, manga_to_read) => {
                 self.go_to_read_chapter(chapter_response, manga_to_read, self.manga_tracker.clone())
@@ -147,10 +150,10 @@ where
         let provider = Arc::new(api_client);
 
         App {
-            picker,
+            picker: picker.clone(),
             current_tab: SelectedPage::default(),
             search_page: SearchPage::new(
-                picker,
+                picker.clone(),
                 Arc::clone(&provider),
                 manga_tracker.clone(),
                 filters_state,
@@ -159,6 +162,7 @@ where
                     MangaProviders::Mangadex => 10,
                     MangaProviders::Weebcentral => 24,
                     MangaProviders::Mangapill => 50,
+                    MangaProviders::Local => 16,
                 }),
             )
             .with_global_sender(global_event_tx.clone()),
@@ -176,11 +180,16 @@ where
             state: AppState::Runnning,
             error_message: None,
             manga_provider: Arc::clone(&provider),
+            pending_goto_prefix: false,
         }
     }
 
     pub fn render_top_tabs(&self, area: Rect, buf: &mut Buffer) {
-        let mut titles: Vec<&str> = vec!["Home <F1>/<u>", "Search <F2>/<i>", "Feed <F3>/<o>"];
+        let mut titles: Vec<&str> = if self.manga_provider.name() == MangaProviders::Local {
+            vec!["Home <gh> [Local]", "Search <gs> [Local]", "Feed <gf> [Local]"]
+        } else {
+            vec!["Home <gh>", "Search <gs>", "Feed <gf>"]
+        };
 
         let tabs_block = Block::default().borders(Borders::BOTTOM);
 
@@ -266,39 +275,69 @@ where
 
     fn key_events_error_message(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Char('q') => self.close_error_mesagge(),
+            KeyCode::Char('q') | KeyCode::Esc => self.close_error_mesagge(),
             KeyCode::Char('c') if key_event.modifiers == KeyModifiers::CONTROL => self.quit(),
             _ => {},
         }
     }
 
-    fn handle_key_events(&mut self, key_event: KeyEvent) {
+    fn handle_key_events(&mut self, key_event: KeyEvent) -> bool {
         if self.manga_page.as_ref().is_some_and(|page| page.is_downloading_all_chapters()) {
-            return;
+            return false;
         }
 
-        if self.search_page.input_mode != InputMode::Typing && !self.search_page.is_typing_filter() && !self.feed_page.is_typing() {
+        if key_event.code == KeyCode::Char('c') && key_event.modifiers == KeyModifiers::CONTROL {
+            self.quit();
+            return true;
+        }
+
+        if self.current_tab != SelectedPage::ReaderTab
+            && self.search_page.input_mode != InputMode::Typing
+            && !self.search_page.is_typing_filter()
+            && !self.feed_page.is_typing()
+        {
+            if self.pending_goto_prefix {
+                self.pending_goto_prefix = false;
+
+                match key_event.code {
+                    KeyCode::Char('h') => {
+                        if self.current_tab != SelectedPage::ReaderTab {
+                            self.global_event_tx.send(Events::GoToHome).ok();
+                        }
+                        return true;
+                    },
+                    KeyCode::Char('s') => {
+                        if self.current_tab != SelectedPage::ReaderTab {
+                            self.global_event_tx.send(Events::GoSearchPage).ok();
+                        }
+                        return true;
+                    },
+                    KeyCode::Char('f') => {
+                        if self.current_tab != SelectedPage::ReaderTab {
+                            self.global_event_tx.send(Events::GoFeedPage).ok();
+                        }
+                        return true;
+                    },
+                    KeyCode::Esc => return true,
+                    _ => {},
+                }
+            }
+
             match key_event.code {
-                KeyCode::Char('c') if key_event.modifiers == KeyModifiers::CONTROL => self.quit(),
-                KeyCode::Char('u') | KeyCode::F(1) => {
-                    if self.current_tab != SelectedPage::ReaderTab {
-                        self.global_event_tx.send(Events::GoToHome).ok();
-                    }
+                KeyCode::Char('q') => {
+                    self.quit();
+                    return true;
                 },
-                KeyCode::Char('i') | KeyCode::F(2) => {
-                    if self.current_tab != SelectedPage::ReaderTab {
-                        self.global_event_tx.send(Events::GoSearchPage).ok();
-                    }
-                },
-                KeyCode::Char('o') | KeyCode::F(3) => {
-                    if self.current_tab != SelectedPage::ReaderTab {
-                        self.global_event_tx.send(Events::GoFeedPage).ok();
-                    }
+                KeyCode::Char('g') => {
+                    self.pending_goto_prefix = true;
+                    return true;
                 },
 
                 _ => {},
             }
         }
+
+        false
     }
 
     fn go_search_page(&mut self) {
@@ -322,7 +361,7 @@ where
 
         let config = MangaTuiConfig::get();
 
-        let manga_page = MangaPage::new(manga, self.picker, Arc::clone(&self.manga_provider))
+        let manga_page = MangaPage::new(manga, self.picker.clone(), Arc::clone(&self.manga_provider))
             .with_global_sender(self.global_event_tx.clone())
             .auto_bookmark(config.auto_bookmark)
             .with_manga_tracker(self.manga_tracker.clone());
@@ -331,20 +370,22 @@ where
     }
 
     fn go_to_read_chapter(&mut self, chapter_to_read: ChapterToRead, manga_to_read: MangaToRead, manga_tracker: Option<S>) {
+        let Some(picker) = self.picker.as_ref().cloned() else {
+            self.display_error_message(
+                "This terminal does not support inline images, so the reader cannot open chapters.".to_string(),
+            );
+            return;
+        };
+
         self.home_page.clean_up();
         self.feed_page.clean_up();
         self.current_tab = SelectedPage::ReaderTab;
 
-        let mut manga_reader = MangaReader::new(
-            chapter_to_read,
-            manga_to_read.manga_id,
-            self.picker.as_ref().cloned().unwrap(),
-            Arc::clone(&self.manga_provider),
-        )
-        .with_global_sender(self.global_event_tx.clone())
-        .with_list_of_chapters(manga_to_read.list)
-        .with_manga_title(manga_to_read.title)
-        .with_manga_tracker(manga_tracker);
+        let mut manga_reader = MangaReader::new(chapter_to_read, manga_to_read.manga_id, picker, Arc::clone(&self.manga_provider))
+            .with_global_sender(self.global_event_tx.clone())
+            .with_list_of_chapters(manga_to_read.list)
+            .with_manga_title(manga_to_read.title)
+            .with_manga_tracker(manga_tracker);
 
         let config = MangaTuiConfig::get();
 
@@ -383,16 +424,22 @@ where
 
     pub async fn listen_to_event(&mut self) {
         if let Some(event) = self.global_event_rx.recv().await {
-            self.handle_events(event.clone());
-
             // If the app is displaying an error message then the user can only close the app or
             // the error message popup
             if self.is_displaying_error_message()
-                && let Events::Key(key_event) = event
+                && let Events::Key(key_event) = event.clone()
             {
                 self.key_events_error_message(key_event);
                 return;
             }
+
+            if let Events::Key(key_event) = event.clone()
+                && self.handle_key_events(key_event)
+            {
+                return;
+            }
+
+            self.handle_events(event.clone());
 
             match self.current_tab {
                 SelectedPage::Search => {
@@ -501,11 +548,12 @@ mod tests {
     }
 
     #[test]
-    fn can_go_to_search_page_by_pressing_i() {
+    fn can_go_to_search_page_by_pressing_gs() {
         let mut app: App<MockMangaPageProvider, TrackerTest> =
             App::new(MockMangaPageProvider::new(), None, None, MockFiltersHandler::new(MockFilterState {}), MockWidgetFilter {});
 
-        press_key(&mut app, KeyCode::Char('i'));
+        press_key(&mut app, KeyCode::Char('g'));
+        press_key(&mut app, KeyCode::Char('s'));
 
         tick(&mut app);
 
@@ -513,13 +561,14 @@ mod tests {
     }
 
     #[test]
-    fn can_go_to_home_by_pressing_u() {
+    fn can_go_to_home_by_pressing_gh() {
         let mut app: App<MockMangaPageProvider, TrackerTest> =
             App::new(MockMangaPageProvider::new(), None, None, MockFiltersHandler::new(MockFilterState {}), MockWidgetFilter {});
 
         app.go_search_page();
 
-        press_key(&mut app, KeyCode::Char('u'));
+        press_key(&mut app, KeyCode::Char('g'));
+        press_key(&mut app, KeyCode::Char('h'));
 
         tick(&mut app);
 
@@ -527,11 +576,12 @@ mod tests {
     }
 
     #[test]
-    fn can_go_to_feed_by_pressing_o() {
+    fn can_go_to_feed_by_pressing_gf() {
         let mut app: App<MockMangaPageProvider, TrackerTest> =
             App::new(MockMangaPageProvider::new(), None, None, MockFiltersHandler::new(MockFilterState {}), MockWidgetFilter {});
 
-        press_key(&mut app, KeyCode::Char('o'));
+        press_key(&mut app, KeyCode::Char('g'));
+        press_key(&mut app, KeyCode::Char('f'));
 
         tick(&mut app);
 
@@ -546,8 +596,10 @@ mod tests {
 
         app.manga_page.as_mut().unwrap().start_downloading_all_chapters();
 
-        press_key(&mut app, KeyCode::Char('o'));
-        press_key(&mut app, KeyCode::Char('i'));
+        press_key(&mut app, KeyCode::Char('g'));
+        press_key(&mut app, KeyCode::Char('f'));
+        press_key(&mut app, KeyCode::Char('g'));
+        press_key(&mut app, KeyCode::Char('s'));
         press_key(&mut app, KeyCode::F(2));
 
         tick(&mut app);
@@ -560,7 +612,7 @@ mod tests {
         let mut app: App<MockMangaPageProvider, TrackerTest> = App::new(
             MockMangaPageProvider::new(),
             None,
-            Some(Picker::new((8, 8))),
+            Some(Picker::halfblocks()),
             MockFiltersHandler::new(MockFilterState {}),
             MockWidgetFilter {},
         )

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use image::DynamicImage;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -24,7 +24,7 @@ use crate::backend::database::{
 use crate::backend::error_log::{self, ErrorType, write_to_error_log};
 use crate::backend::manga_provider::{
     ChapterFilters, ChapterOrderBy, ChapterToRead, GetChaptersResponse, Languages, ListOfChapters, Manga, MangaPageProvider,
-    Pagination,
+    MangaProviders, Pagination,
 };
 use crate::backend::tracker::{MangaTracker, track_manga};
 use crate::backend::tui::Events;
@@ -121,7 +121,7 @@ where
     S: MangaTracker,
 {
     pub manga: Manga,
-    image_state: Option<Box<dyn Protocol>>,
+    image_state: Option<Protocol>,
     cover_area: Rect,
     global_event_tx: Option<UnboundedSender<Events>>,
     local_action_tx: UnboundedSender<MangaPageActions>,
@@ -234,7 +234,7 @@ where
 
         match self.image_state.as_ref() {
             Some(state) => {
-                let image = Image::new(state.as_ref());
+                let image = Image::new(state);
                 Widget::render(image, cover_area, buf);
             },
             None => {
@@ -262,8 +262,14 @@ where
             None => String::new(),
         };
 
+        let title = if self.manga_provider.name() == MangaProviders::Local {
+            format!("{} [Local]", self.manga.title)
+        } else {
+            self.manga.title.clone()
+        };
+
         Block::bordered()
-            .title_top(self.manga.title.clone())
+            .title_top(title)
             .title_bottom(Line::from(vec![statistics, " ".into(), Span::raw(authors), Span::raw(artist)]))
             .render(manga_information_area, buf);
 
@@ -319,10 +325,10 @@ where
 
                 if self.picker.is_some() {
                     chapter_instructions.push(" Read chapter ".into());
-                    chapter_instructions.push(Span::raw(" <r> ").style(*INSTRUCTIONS_STYLE));
+                    chapter_instructions.push(Span::raw(" <Enter>/<l> ").style(*INSTRUCTIONS_STYLE));
 
                     chapter_instructions.push(" Read bookmark ".into());
-                    chapter_instructions.push(Span::raw(" <Tab> ").style(*INSTRUCTIONS_STYLE));
+                    chapter_instructions.push(Span::raw(" <B> ").style(*INSTRUCTIONS_STYLE));
                 }
 
                 let mut bottom_instructions: Vec<Span<'_>> = vec![
@@ -330,9 +336,9 @@ where
                     " | ".into(),
                     total.into(),
                     " Next ".into(),
-                    "<w>".to_span().style(*INSTRUCTIONS_STYLE),
+                    "<C-d>".to_span().style(*INSTRUCTIONS_STYLE),
                     " Previous ".into(),
-                    "<b>".to_span().style(*INSTRUCTIONS_STYLE),
+                    "<C-u>".to_span().style(*INSTRUCTIONS_STYLE),
                 ];
                 if !self.bookmark_state.auto_bookmark {
                     bottom_instructions.push(" Bookmark chapter ".into());
@@ -391,7 +397,7 @@ where
                 "Up/Down".into(),
                 Span::raw(" <k><j> ").style(*INSTRUCTIONS_STYLE),
                 "Search ".into(),
-                Span::raw("<s>").style(*INSTRUCTIONS_STYLE),
+                Span::raw("<Enter>").style(*INSTRUCTIONS_STYLE),
             ]);
 
             let available_language_list = List::new(
@@ -410,7 +416,7 @@ where
                 self.chapter_filters.language.as_emoji().into(),
                 " | ".into(),
                 "Available languages: ".into(),
-                "<l>".bold().yellow(),
+                "<L>".bold().yellow(),
             ]))
             .render(language_area, buf);
         }
@@ -435,10 +441,10 @@ where
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.local_action_tx.send(MangaPageActions::ScrollUpAvailbleLanguages).ok();
                 },
-                KeyCode::Enter | KeyCode::Char('s') => {
+                KeyCode::Enter | KeyCode::Char('l') => {
                     self.local_action_tx.send(MangaPageActions::SearchByLanguage).ok();
                 },
-                KeyCode::Char('l') | KeyCode::Esc => {
+                KeyCode::Char('h') | KeyCode::Esc => {
                     self.local_action_tx.send(MangaPageActions::ToggleAvailableLanguagesList).ok();
                 },
                 _ => {},
@@ -477,8 +483,14 @@ where
                     KeyCode::Char('t') => {
                         self.local_action_tx.send(MangaPageActions::ToggleOrder).ok();
                     },
-                    KeyCode::Char('r') | KeyCode::Enter => {
+                    KeyCode::Char('l') | KeyCode::Enter => {
                         self.local_action_tx.send(MangaPageActions::ReadChapter).ok();
+                    },
+                    KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
+                        self.local_action_tx.send(MangaPageActions::SearchNextChapterPage).ok();
+                    },
+                    KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
+                        self.local_action_tx.send(MangaPageActions::SearchPreviousChapterPage).ok();
                     },
                     KeyCode::Char('d') => {
                         self.local_action_tx.send(MangaPageActions::DownloadChapter).ok();
@@ -486,21 +498,15 @@ where
                     KeyCode::Char('a') => {
                         self.local_action_tx.send(MangaPageActions::AskDownloadAllChapters).ok();
                     },
-                    KeyCode::Char('l') => {
+                    KeyCode::Char('L') => {
                         self.local_action_tx.send(MangaPageActions::ToggleAvailableLanguagesList).ok();
-                    },
-                    KeyCode::Char('w') => {
-                        self.local_action_tx.send(MangaPageActions::SearchNextChapterPage).ok();
-                    },
-                    KeyCode::Char('b') => {
-                        self.local_action_tx.send(MangaPageActions::SearchPreviousChapterPage).ok();
                     },
                     KeyCode::Char('m') => {
                         if !self.bookmark_state.auto_bookmark {
                             self.local_action_tx.send(MangaPageActions::BookMarkChapterSelected).ok();
                         }
                     },
-                    KeyCode::Tab => {
+                    KeyCode::Char('B') => {
                         self.local_action_tx.send(MangaPageActions::GoToReadBookmarkedChapter).ok();
                     },
 
@@ -940,7 +946,7 @@ where
     }
 
     fn load_cover(&mut self, img: DynamicImage) {
-        let fixed_protocol = self.picker.as_mut().unwrap().new_protocol(img, self.cover_area, Resize::Fit(None));
+        let fixed_protocol = self.picker.as_mut().unwrap().new_protocol(img, self.cover_area.into(), Resize::Fit(None));
         if let Ok(protocol) = fixed_protocol {
             self.image_state = Some(protocol);
         }
@@ -1241,19 +1247,19 @@ mod test {
         assert_eq!(MangaPageActions::ToggleOrder, action);
 
         // Go next chapter page
-        press_key(&mut manga_page, KeyCode::Char('w'));
+        manga_page.handle_events(Events::Key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)));
         let action = manga_page.local_action_rx.recv().await.unwrap();
 
         assert_eq!(MangaPageActions::SearchNextChapterPage, action);
 
         // Go previous chapter page
-        press_key(&mut manga_page, KeyCode::Char('b'));
+        manga_page.handle_events(Events::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)));
         let action = manga_page.local_action_rx.recv().await.unwrap();
 
         assert_eq!(MangaPageActions::SearchPreviousChapterPage, action);
 
         // Open available_languages list
-        press_key(&mut manga_page, KeyCode::Char('l'));
+        press_key(&mut manga_page, KeyCode::Char('L'));
         let action = manga_page.local_action_rx.recv().await.unwrap();
 
         assert_eq!(MangaPageActions::ToggleAvailableLanguagesList, action);
@@ -1273,7 +1279,7 @@ mod test {
         assert_eq!(MangaPageActions::ScrollUpAvailbleLanguages, action);
 
         // search by a language selected
-        press_key(&mut manga_page, KeyCode::Char('s'));
+        press_key(&mut manga_page, KeyCode::Enter);
         let action = manga_page.local_action_rx.recv().await.unwrap();
 
         assert_eq!(MangaPageActions::SearchByLanguage, action);
@@ -1317,7 +1323,7 @@ mod test {
         manga_page.cancel_download_all_chapters();
 
         // read a chapter
-        press_key(&mut manga_page, KeyCode::Char('r'));
+        press_key(&mut manga_page, KeyCode::Enter);
         let action = manga_page.local_action_rx.recv().await.unwrap();
 
         assert_eq!(MangaPageActions::ReadChapter, action);
@@ -1680,10 +1686,10 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_send_event_to_read_bookmark_chapter_by_pressing_tab() {
+    async fn it_send_event_to_read_bookmark_chapter_by_pressing_b() {
         let mut manga_page: MangaPage<MockMangaPageProvider, TrackerTest> =
             MangaPage::new(Manga::default(), None, MockMangaPageProvider::new().into());
-        manga_page.handle_events(Events::Key(KeyCode::Tab.into()));
+        manga_page.handle_events(Events::Key(KeyCode::Char('B').into()));
 
         let expected = MangaPageActions::GoToReadBookmarkedChapter;
 
@@ -1758,7 +1764,7 @@ mod test {
         let failing_tracker = TrackerTest::failing_with_error_message(expected_error_message);
 
         let mut manga_page: MangaPage<MockMangaPageProvider, TrackerTest> =
-            MangaPage::new(Manga::default(), Some(Picker::new((1, 2))), MockMangaPageProvider::new().into());
+            MangaPage::new(Manga::default(), Some(Picker::halfblocks()), MockMangaPageProvider::new().into());
 
         flush_events(&mut manga_page);
 

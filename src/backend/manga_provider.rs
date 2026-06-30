@@ -23,6 +23,7 @@ use crate::global::PREFERRED_LANGUAGE;
 use crate::view::widgets::StatefulWidgetFrame;
 
 pub mod filters;
+pub mod local;
 pub mod mangadex;
 pub mod mangapill;
 pub mod weebcentral;
@@ -666,6 +667,8 @@ pub enum MangaProviders {
     Weebcentral,
     #[strum(to_string = "mangapill")]
     Mangapill,
+    #[strum(to_string = "local")]
+    Local,
 }
 
 pub trait GetRawImage {

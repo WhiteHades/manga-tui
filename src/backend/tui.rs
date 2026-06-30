@@ -35,13 +35,9 @@ pub enum Events {
 
 #[cfg(unix)]
 fn get_picker() -> Option<Picker> {
-    Picker::from_termios()
+    Picker::from_query_stdio()
         .ok()
-        .map(|mut picker| {
-            picker.guess_protocol();
-            picker
-        })
-        .filter(|picker| picker.protocol_type != ProtocolType::Halfblocks)
+        .filter(|picker| picker.protocol_type() != ProtocolType::Halfblocks)
 }
 
 #[cfg(target_os = "windows")]
@@ -78,24 +74,28 @@ fn get_picker() -> Option<Picker> {
         _ => FontSize::default(),
     };
 
-    let mut picker = Picker::new((size.width, size.height));
+    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
 
-    let protocol = picker.guess_protocol();
-
-    if protocol == ProtocolType::Halfblocks {
+    if picker.protocol_type() == ProtocolType::Halfblocks {
         return None;
     }
     Some(picker)
 }
 
 ///Start app's main loop
-pub async fn run_app<T: MangaProvider>(
-    mut terminal: Terminal<impl Backend>,
+pub async fn run_app<T, B, S>(
+    mut terminal: Terminal<B>,
     api_client: T,
-    manga_tracker: Option<impl MangaTracker>,
+    manga_tracker: Option<S>,
     filter_state: T::FiltersHandler,
     filter_widget: T::Widget,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error>>
+where
+    T: MangaProvider,
+    B: Backend,
+    B::Error: 'static,
+    S: MangaTracker,
+{
     let mut app = App::new(api_client, manga_tracker, get_picker(), filter_state, filter_widget);
 
     let tick_rate = std::time::Duration::from_millis(250);

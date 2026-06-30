@@ -48,7 +48,7 @@
 //! This separation allows for responsive UI while handling async operations.
 use std::sync::Arc;
 
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use manga_tui::SearchTerm;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -344,7 +344,7 @@ where
             FeedTabs::PlantToRead => 1,
         };
 
-        let tabs_instructions = Line::from(vec!["Switch tab: ".into(), Span::raw("<tab>").style(*INSTRUCTIONS_STYLE)]);
+        let tabs_instructions = Line::from(vec!["Switch tab: ".into(), Span::raw("<Tab>").style(*INSTRUCTIONS_STYLE)]);
 
         Tabs::new(vec!["Reading history", "Plan to Read"])
             .select(selected_tab)
@@ -355,7 +355,7 @@ where
         let input_help: Vec<Span<'_>> = if self.is_typing {
             vec!["Press ".into(), Span::raw("<Enter>").style(*INSTRUCTIONS_STYLE), " to search".into()]
         } else {
-            vec!["Press ".into(), Span::raw("<s>").style(*INSTRUCTIONS_STYLE), " to filter mangas".into()]
+            vec!["Press ".into(), Span::raw("</>").style(*INSTRUCTIONS_STYLE), " to filter mangas".into()]
         };
 
         render_search_bar(self.is_typing, input_help.into(), &self.search_bar, frame, search_bar_area);
@@ -493,8 +493,8 @@ where
             };
         } else if self.state == FeedState::AskingDeleteAllConfirmation {
             match key_event.code {
-                KeyCode::Char('w') => self.remove_all_mangas(),
-                KeyCode::Char('q') | KeyCode::Esc => self.state = FeedState::DisplayingHistory,
+                KeyCode::Char('y') | KeyCode::Enter => self.remove_all_mangas(),
+                KeyCode::Char('n') | KeyCode::Char('q') | KeyCode::Esc => self.state = FeedState::DisplayingHistory,
                 _ => {},
             }
         } else {
@@ -508,17 +508,17 @@ where
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.local_action_tx.send(FeedActions::ScrollHistoryUp).ok();
                 },
-                KeyCode::Char('w') => {
+                KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
                     self.local_action_tx.send(FeedActions::NextPage).ok();
                 },
 
-                KeyCode::Char('b') => {
+                KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
                     self.local_action_tx.send(FeedActions::PreviousPage).ok();
                 },
-                KeyCode::Char('r') => {
+                KeyCode::Char('l') | KeyCode::Enter => {
                     self.local_action_tx.send(FeedActions::GoToMangaPage).ok();
                 },
-                KeyCode::Char('s') => {
+                KeyCode::Char('/') => {
                     self.local_action_tx.send(FeedActions::ToggleSearchBar).ok();
                 },
                 KeyCode::Char('d') => {
@@ -1195,12 +1195,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn focus_search_bar_when_pressing_s_and_unfocus_when_pressing_esc() {
+    async fn focus_search_bar_when_pressing_slash_and_unfocus_when_pressing_esc() {
         let mut feed_page: Feed<MockMangaPageProvider> = Feed::new();
 
         assert!(!feed_page.is_typing(), "search_bar should not be focused by default");
 
-        press_key(&mut feed_page, KeyCode::Char('s'));
+        press_key(&mut feed_page, KeyCode::Char('/'));
 
         let action_sent = feed_page.local_action_rx.recv().await.expect("no key event was sent");
 
@@ -1256,13 +1256,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn goes_to_manga_page_when_pressing_r_with_selected_manga() {
+    async fn goes_to_manga_page_when_pressing_enter_with_selected_manga() {
         let (tx, mut rx) = unbounded_channel::<Events>();
         let mut feed_page: Feed<MockMangaPageProvider> =
             Feed::new().with_global_sender(tx).with_api_client(MockMangaPageProvider::new().into());
 
         render_history_and_select(&mut feed_page);
-        press_key(&mut feed_page, KeyCode::Char('r'));
+        press_key(&mut feed_page, KeyCode::Enter);
 
         let key_event = feed_page.local_action_rx.recv().await.expect("no key event was sent");
 

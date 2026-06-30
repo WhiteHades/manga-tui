@@ -8,7 +8,7 @@ use ratatui::text::{Line, ToSpan};
 use ratatui::widgets::{Block, LineGauge, Paragraph, StatefulWidget, Widget, Wrap};
 use throbber_widgets_tui::{Throbber, ThrobberState};
 use tokio::sync::mpsc::UnboundedSender;
-use tui_widget_list::PreRender;
+use tui_widget_list::{ListBuilder, ListView};
 
 use crate::backend::manga_provider::Chapter;
 use crate::global::{CURRENT_LIST_ITEM_STYLE, ERROR_STYLE, INSTRUCTIONS_STYLE};
@@ -125,16 +125,6 @@ impl Widget for ChapterItem {
     }
 }
 
-impl PreRender for ChapterItem {
-    fn pre_render(&mut self, context: &tui_widget_list::PreRenderContext) -> u16 {
-        if context.is_selected {
-            self.style = *CURRENT_LIST_ITEM_STYLE;
-        }
-
-        if self.download_loading_state.is_some() { 3 } else { 1 }
-    }
-}
-
 impl ChapterItem {
     pub fn new(chapter: Chapter) -> Self {
         Self {
@@ -183,7 +173,17 @@ impl StatefulWidget for ChaptersListWidget {
     type State = tui_widget_list::ListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let chapters_list = tui_widget_list::List::new(self.chapters);
+        let chapters = self.chapters;
+        let item_count = chapters.len();
+        let builder = ListBuilder::new(move |context| {
+            let mut chapter = chapters[context.index].clone();
+            if context.is_selected {
+                chapter.style = *CURRENT_LIST_ITEM_STYLE;
+            }
+            let height = if chapter.download_loading_state.is_some() { 3 } else { 1 };
+            (chapter, height)
+        });
+        let chapters_list = ListView::new(builder, item_count);
         StatefulWidget::render(chapters_list, area, buf, state);
     }
 }

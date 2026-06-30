@@ -15,7 +15,9 @@ use tokio::task::JoinSet;
 
 use crate::backend::database::{Bookmark, ChapterToBookmark, ChapterToSaveHistory, Database, MangaReadingHistorySave};
 use crate::backend::error_log::{ErrorType, write_to_error_log};
-use crate::backend::manga_provider::{ChapterReader, ChapterToRead, ListOfChapters, MangaPanel, ReaderPageProvider};
+use crate::backend::manga_provider::{
+    ChapterReader, ChapterToRead, ListOfChapters, MangaPanel, MangaProviders, ReaderPageProvider,
+};
 use crate::backend::tracker::{MangaTracker, track_manga};
 use crate::backend::tui::Events;
 use crate::common::format_error_message_tracking_reading_history;
@@ -73,7 +75,7 @@ pub enum MangaReaderEvents {
 }
 
 pub struct Page {
-    pub image_state: Option<Box<dyn StatefulProtocol>>,
+    pub image_state: Option<StatefulProtocol>,
     pub dimensions: Option<(u32, u32)>,
 }
 
@@ -122,22 +124,28 @@ where
 
     fn render(&mut self, area: Rect, frame: &mut Frame<'_>) {
         let buf = frame.buffer_mut();
+        let index = self.current_page_index();
 
-        let layout = match self.current_page_size {
-            PageSize::Normal => [Constraint::Percentage(30), Constraint::Percentage(40), Constraint::Percentage(30)],
-            PageSize::Wide => [Constraint::Percentage(20), Constraint::Percentage(60), Constraint::Percentage(20)],
+        if let Some((width, height)) = self.pages.get(index).and_then(|page| page.dimensions) {
+            self.resize_based_on_image_size(width, height);
+        }
+
+        let layout = match (self.current_page_size.clone(), area.width >= 90) {
+            (PageSize::Normal, true) => [Constraint::Length(26), Constraint::Min(20), Constraint::Length(34)],
+            (PageSize::Wide, true) => [Constraint::Length(22), Constraint::Min(20), Constraint::Length(30)],
+            (PageSize::Normal, false) => [Constraint::Percentage(28), Constraint::Percentage(44), Constraint::Percentage(28)],
+            (PageSize::Wide, false) => [Constraint::Percentage(22), Constraint::Percentage(56), Constraint::Percentage(22)],
         };
 
         let [left, center, right] = Layout::horizontal(layout).areas(area);
 
         Block::bordered().render(left, buf);
 
-        let index = self.current_page_index();
         let show_reload = if let Some(page) = self.pages.get_mut(index).filter(|page| page.image_state.is_some()) {
-            let image = StatefulImage::new(None).resize(Resize::Fit(None));
-            StatefulWidget::render(image, center, buf, page.image_state.as_mut().unwrap());
+            let image = StatefulImage::new().resize(Resize::Fit(None));
             let (width, height) = page.dimensions.unwrap();
-            self.resize_based_on_image_size(width, height);
+            let image_area = centered_image_area(center, width, height);
+            StatefulWidget::render(image, image_area, buf, page.image_state.as_mut().unwrap());
 
             false
         } else {
@@ -300,7 +308,7 @@ where
     }
 
     fn resize_based_on_image_size(&mut self, width: u32, height: u32) {
-        if width > height && width > 300 {
+        if width > height {
             self.current_page_size = PageSize::Wide;
         } else {
             self.current_page_size = PageSize::Normal;
@@ -470,9 +478,11 @@ where
                 .areas(area);
 
         let mut instructions = vec![
-            Line::from(vec!["Go back: ".into(), "<Backspace>".to_span().style(*INSTRUCTIONS_STYLE)]),
-            Line::from(vec!["Next chapter: ".into(), "<w>".to_span().style(*INSTRUCTIONS_STYLE)]),
-            Line::from(vec!["Previous chapter: ".into(), "<b>".to_span().style(*INSTRUCTIONS_STYLE)]),
+            Line::from(vec!["Exit reader: ".into(), "<q>/<Backspace>".to_span().style(*INSTRUCTIONS_STYLE)]),
+            Line::from(vec!["Next page: ".into(), "<j>/<l>".to_span().style(*INSTRUCTIONS_STYLE)]),
+            Line::from(vec!["Previous page: ".into(), "<k>/<h>".to_span().style(*INSTRUCTIONS_STYLE)]),
+            Line::from(vec!["Next chapter: ".into(), "<n>".to_span().style(*INSTRUCTIONS_STYLE)]),
+            Line::from(vec!["Previous chapter: ".into(), "<N>".to_span().style(*INSTRUCTIONS_STYLE)]),
         ];
 
         if show_reload {
@@ -485,8 +495,9 @@ where
 
         Widget::render(List::new(instructions).block(Block::bordered()), instructions_area, buf);
 
+        let local_badge = if self.api_client.name() == MangaProviders::Local { " [Local]" } else { "" };
         let current_chapter_title = format!(
-            "Reading : Vol {} Ch. {} {}",
+            "Reading{local_badge}: Vol {} Ch. {} {}",
             self.current_chapter.volume_number.as_ref().cloned().unwrap_or("none".to_string()),
             self.current_chapter.number,
             self.current_chapter.title
@@ -557,16 +568,16 @@ where
 
     fn handle_key_events(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l') => {
                 self.local_action_tx.send(MangaReaderActions::NextPage).ok();
             },
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
                 self.local_action_tx.send(MangaReaderActions::PreviousPage).ok();
             },
-            KeyCode::Char('w') => {
+            KeyCode::Char('n') => {
                 self.local_action_tx.send(MangaReaderActions::SearchNextChapter).ok();
             },
-            KeyCode::Char('b') => {
+            KeyCode::Char('N') => {
                 self.local_action_tx.send(MangaReaderActions::SearchPreviousChapter).ok();
             },
             KeyCode::Char('r') => {
@@ -577,7 +588,7 @@ where
                     self.local_action_tx.send(MangaReaderActions::BookMarkCurrentChapter).ok();
                 }
             },
-            KeyCode::Backspace => {
+            KeyCode::Char('q') | KeyCode::Backspace => {
                 self.local_action_tx.send(MangaReaderActions::ExitReaderPage).ok();
             },
             _ => {},
@@ -671,6 +682,32 @@ where
     }
 }
 
+fn centered_image_area(area: Rect, width: u32, height: u32) -> Rect {
+    if width == 0 || height == 0 || area.width <= 1 || area.height <= 1 {
+        return area;
+    }
+
+    let image_ratio = width as f64 / height as f64;
+    let area_ratio = area.width as f64 / area.height as f64;
+
+    let (target_width, target_height) = if image_ratio > area_ratio {
+        let target_width = area.width;
+        let target_height = ((target_width as f64 / image_ratio).round() as u16).clamp(1, area.height);
+        (target_width, target_height)
+    } else {
+        let target_height = area.height;
+        let target_width = ((target_height as f64 * image_ratio).round() as u16).clamp(1, area.width);
+        (target_width, target_height)
+    };
+
+    Rect {
+        x: area.x + area.width.saturating_sub(target_width) / 2,
+        y: area.y + area.height.saturating_sub(target_height) / 2,
+        width: target_width,
+        height: target_height,
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::error::Error;
@@ -692,7 +729,7 @@ mod test {
         T: ReaderPageProvider,
         S: MangaTracker,
     {
-        let picker = Picker::new((8, 19));
+        let picker = Picker::halfblocks();
         let chapter_id = "some_id".to_string();
         let url_imgs = vec!["http://localhost".parse().unwrap(), "http://localhost".parse().unwrap()];
         MangaReader::new(
@@ -763,7 +800,7 @@ mod test {
         };
 
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(chapter, "some_id".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into());
+            MangaReader::new(chapter, "some_id".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into());
 
         manga_reader.init_fetching_pages();
         manga_reader.fetch_pages();
@@ -779,7 +816,7 @@ mod test {
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> = MangaReader::new(
             ChapterToRead::default(),
             "some_id".to_string(),
-            Picker::new((8, 8)),
+            Picker::halfblocks(),
             ReaderPageProvierMock::new().into(),
         );
 
@@ -791,17 +828,16 @@ mod test {
 
         assert_eq!(PageSize::Normal, manga_reader.current_page_size);
 
-        // only resize if the image is big enough
         manga_reader.resize_based_on_image_size(300, 200);
 
-        assert_eq!(PageSize::Normal, manga_reader.current_page_size);
+        assert_eq!(PageSize::Wide, manga_reader.current_page_size);
     }
 
     #[test]
     fn it_does_not_initiate_search_next_chapter_if_there_is_no_next_chapter() {
         let list_of_chapters = ListOfChapters::default();
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into())
+            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into())
                 .with_list_of_chapters(list_of_chapters);
 
         manga_reader.initiate_search_next_chapter();
@@ -813,7 +849,7 @@ mod test {
     fn it_does_not_initiate_search_previous_chapter_if_there_is_no_previous_chapter() {
         let list_of_chapters = ListOfChapters::default();
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into())
+            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into())
                 .with_list_of_chapters(list_of_chapters);
 
         manga_reader.initiate_search_previous_chapter();
@@ -847,7 +883,7 @@ mod test {
         };
 
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(current_chapter, "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into())
+            MangaReader::new(current_chapter, "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into())
                 .with_list_of_chapters(list_of_chapters);
 
         manga_reader.initiate_search_next_chapter();
@@ -888,7 +924,7 @@ mod test {
         };
 
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(current_chapter, "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into())
+            MangaReader::new(current_chapter, "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into())
                 .with_list_of_chapters(list_of_chapters);
 
         manga_reader.initiate_search_previous_chapter();
@@ -903,11 +939,11 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_sends_search_next_chapter_action_on_w_key_press() {
+    async fn it_sends_search_next_chapter_action_on_n_key_press() {
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into());
+            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into());
 
-        press_key(&mut manga_reader, KeyCode::Char('w'));
+        press_key(&mut manga_reader, KeyCode::Char('n'));
 
         let expected_event = timeout(Duration::from_millis(250), manga_reader.local_action_rx.recv())
             .await
@@ -918,11 +954,11 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_sends_search_previous_chapter_event_on_b_key_press() {
+    async fn it_sends_search_previous_chapter_event_on_shift_n_key_press() {
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into());
+            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into());
 
-        press_key(&mut manga_reader, KeyCode::Char('b'));
+        press_key(&mut manga_reader, KeyCode::Char('N'));
 
         let expected_event = timeout(Duration::from_millis(250), manga_reader.local_action_rx.recv())
             .await
@@ -947,7 +983,7 @@ mod test {
         let api_client = ReaderPageProvierMock::with_response(expected.clone());
 
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "some_id".to_string(), Picker::new((8, 8)), api_client.into());
+            MangaReader::new(ChapterToRead::default(), "some_id".to_string(), Picker::halfblocks(), api_client.into());
 
         manga_reader.search_chapter("some_id".to_string());
 
@@ -964,7 +1000,7 @@ mod test {
         let api_client = ReaderPageProvierMock::with_failing_request();
 
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "some_id".to_string(), Picker::new((8, 8)), api_client.into());
+            MangaReader::new(ChapterToRead::default(), "some_id".to_string(), Picker::halfblocks(), api_client.into());
 
         manga_reader.search_chapter("some_id".to_string());
 
@@ -991,7 +1027,7 @@ mod test {
         let api_client = ReaderPageProvierMock::with_response(expected.clone());
 
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "some_id".to_string(), Picker::new((8, 8)), api_client.into());
+            MangaReader::new(ChapterToRead::default(), "some_id".to_string(), Picker::halfblocks(), api_client.into());
 
         manga_reader.state = State::SearchingChapter;
 
@@ -1006,7 +1042,7 @@ mod test {
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> = MangaReader::new(
             ChapterToRead::default(),
             "some_id".to_string(),
-            Picker::new((8, 8)),
+            Picker::halfblocks(),
             ReaderPageProvierMock::new().into(),
         );
 
@@ -1024,7 +1060,7 @@ mod test {
     #[tokio::test]
     async fn it_send_event_to_search_pages_after_chapter_was_loaded() {
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into());
+            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into());
 
         manga_reader.load_chapter(ChapterToRead::default());
 
@@ -1041,7 +1077,7 @@ mod test {
     #[tokio::test]
     async fn it_send_event_to_save_reading_status_to_database_after_chapter_was_loaded() {
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into());
+            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into());
 
         let new_chapter: ChapterToRead = ChapterToRead {
             id: "chapter_to_save".to_string(),
@@ -1074,7 +1110,7 @@ mod test {
     //    };
     //
     //    let manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-    //        MangaReader::new(chapter, "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into());
+    //        MangaReader::new(chapter, "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into());
     //
     //    let id_chapter_saved = manga_reader.save_reading_history(&mut conn)?;
     //
@@ -1097,7 +1133,7 @@ mod test {
     //    let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> = MangaReader::new(
     //        ChapterToRead::default(),
     //        "some_id".to_string(),
-    //        Picker::new((8, 8)),
+    //        Picker::halfblocks(),
     //        ReaderPageProvierMock::new().into(),
     //    );
     //
@@ -1116,7 +1152,7 @@ mod test {
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> = MangaReader::new(
             ChapterToRead::default(),
             "some_id".to_string(),
-            Picker::new((8, 8)),
+            Picker::halfblocks(),
             ReaderPageProvierMock::new().into(),
         );
 
@@ -1159,7 +1195,7 @@ mod test {
     #[test]
     fn it_sets_current_chapter_as_bookmarked_and_sets_state_as_bookmarked() {
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into());
+            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into());
 
         let mut database = TestDatabase::new();
 
@@ -1178,7 +1214,7 @@ mod test {
         };
 
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(chapter_to_read, "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into());
+            MangaReader::new(chapter_to_read, "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into());
 
         manga_reader.pages_list = PagesList::new(vec![PagesItem::new(0), PagesItem::new(1)]);
 
@@ -1193,7 +1229,7 @@ mod test {
     #[tokio::test]
     async fn it_does_not_send_event_to_bookmark_chapter_on_m_key_press_if_autobookmarking_is_true() {
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into());
+            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into());
 
         manga_reader.set_auto_bookmark();
 
@@ -1206,7 +1242,7 @@ mod test {
     async fn it_sends_event_go_manga_page_on_exit() {
         let (tx, mut rx) = unbounded_channel::<Events>();
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into())
+            MangaReader::new(ChapterToRead::default(), "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into())
                 .with_global_sender(tx);
 
         manga_reader.exit();
@@ -1229,7 +1265,7 @@ mod test {
         };
 
         let mut manga_reader: MangaReader<ReaderPageProvierMock, TrackerTest> =
-            MangaReader::new(chapter.clone(), "".to_string(), Picker::new((8, 8)), ReaderPageProvierMock::new().into())
+            MangaReader::new(chapter.clone(), "".to_string(), Picker::halfblocks(), ReaderPageProvierMock::new().into())
                 .with_manga_title("some_title".to_string());
 
         let expected_error_message = "some_error_message";

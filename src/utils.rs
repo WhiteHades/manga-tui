@@ -55,6 +55,6 @@ pub fn render_search_bar(is_typing: bool, input_help: Line<'_>, input: &Input, f
     let scroll = input.visual_scroll(width as usize);
 
     if is_typing {
-        frame.set_cursor(area.x + ((input.visual_cursor()).max(scroll) - scroll) as u16 + 1, area.y + 1)
+        frame.set_cursor_position((area.x + ((input.visual_cursor()).max(scroll) - scroll) as u16 + 1, area.y + 1))
     }
 }

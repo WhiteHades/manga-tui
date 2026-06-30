@@ -4,7 +4,6 @@ use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
 use ratatui::style::Styled;
 use ratatui::text::Line;
-use ratatui::widgets::block::Title;
 use ratatui::widgets::{Block, Clear, Paragraph, Widget, WidgetRef, Wrap};
 
 use crate::backend::tui::Events;
@@ -122,11 +121,11 @@ impl<'a> Widget for ErrorModalBody<'a> {
 impl<'a> WidgetRef for ErrorModalBody<'a> {
     fn render_ref(&self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
         Block::bordered()
-            .title(Title::from(Line::from(vec![
+            .title(Line::from(vec![
                 "Some error ocurred, press ".into(),
-                "<q>".set_style(*INSTRUCTIONS_STYLE),
+                "<q>/<Esc>".set_style(*INSTRUCTIONS_STYLE),
                 " to close this popup".into(),
-            ])))
+            ]))
             .render(area, buf);
 
         let inner = area.inner(Margin {
