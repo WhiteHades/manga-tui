@@ -254,6 +254,9 @@ where
         {
             reader_page.bookmark_current_chapter();
         }
+        if let Some(reader_page) = self.manga_reader_page.as_mut() {
+            reader_page.finish_reading_session();
+        }
     }
 
     fn quit(&mut self) {

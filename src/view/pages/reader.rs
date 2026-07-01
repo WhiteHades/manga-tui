@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
@@ -40,7 +41,10 @@ pub enum MangaReaderActions {
     SearchPreviousChapter,
     NextPage,
     PreviousPage,
+    FirstPage,
+    LastPage,
     ReloadPage,
+    ToggleInfoPanel,
     ExitReaderPage,
 }
 
@@ -105,6 +109,8 @@ where
     image_tasks: JoinSet<()>,
     picker: Picker,
     search_next_chapter_loader: ThrobberState,
+    reading_started_at: Option<Instant>,
+    show_info_panel: bool,
     api_client: Arc<T>,
     pub manga_tracker: Option<S>,
     pub auto_bookmark: bool,
@@ -130,16 +136,8 @@ where
             self.resize_based_on_image_size(width, height);
         }
 
-        let layout = match (self.current_page_size.clone(), area.width >= 90) {
-            (PageSize::Normal, true) => [Constraint::Length(26), Constraint::Min(20), Constraint::Length(34)],
-            (PageSize::Wide, true) => [Constraint::Length(22), Constraint::Min(20), Constraint::Length(30)],
-            (PageSize::Normal, false) => [Constraint::Percentage(28), Constraint::Percentage(44), Constraint::Percentage(28)],
-            (PageSize::Wide, false) => [Constraint::Percentage(22), Constraint::Percentage(56), Constraint::Percentage(22)],
-        };
-
-        let [left, center, right] = Layout::horizontal(layout).areas(area);
-
-        Block::bordered().render(left, buf);
+        let canvas = ReaderCanvas::new(area, self.show_info_panel);
+        let center = canvas.image_area;
 
         let show_reload = if let Some(page) = self.pages.get_mut(index).filter(|page| page.image_state.is_some()) {
             let image = StatefulImage::new().resize(Resize::Fit(None));
@@ -165,8 +163,9 @@ where
             show_failed
         };
 
-        self.render_page_list(left, buf);
-        self.render_right_panel(buf, right, show_reload);
+        if let Some(panel_area) = canvas.panel_area {
+            self.render_info_panel(buf, panel_area, show_reload);
+        }
     }
 
     fn update(&mut self, action: Self::Actions) {
@@ -177,7 +176,10 @@ where
             MangaReaderActions::SearchNextChapter => self.initiate_search_next_chapter(),
             MangaReaderActions::NextPage => self.next_page(),
             MangaReaderActions::PreviousPage => self.previous_page(),
+            MangaReaderActions::FirstPage => self.first_page(),
+            MangaReaderActions::LastPage => self.last_page(),
             MangaReaderActions::ReloadPage => self.reload_page(),
+            MangaReaderActions::ToggleInfoPanel => self.show_info_panel = !self.show_info_panel,
         }
     }
 
@@ -237,6 +239,8 @@ where
             current_page_size: PageSize::default(),
             pages_list: PagesList::default(),
             search_next_chapter_loader: ThrobberState::default(),
+            reading_started_at: Some(Instant::now()),
+            show_info_panel: true,
             picker,
             api_client,
         }
@@ -280,6 +284,18 @@ where
         self.fetch_page(self.current_page_index());
     }
 
+    fn first_page(&mut self) {
+        self.page_list_state.list_state.select(Some(0));
+        self.fetch_pages();
+    }
+
+    fn last_page(&mut self) {
+        if !self.pages.is_empty() {
+            self.page_list_state.list_state.select(Some(self.pages.len() - 1));
+            self.fetch_pages();
+        }
+    }
+
     fn render_page_list(&mut self, area: Rect, buf: &mut Buffer) {
         let inner_area = area.inner(Margin {
             horizontal: 1,
@@ -320,6 +336,7 @@ where
 
         self.current_chapter = chapter;
         self.state = State::SearchingPages;
+        self.reading_started_at = Some(Instant::now());
 
         self.init_fetching_pages();
         self.init_save_reading_history();
@@ -464,25 +481,42 @@ where
         );
     }
 
+    pub fn finish_reading_session(&mut self) {
+        let Some(started_at) = self.reading_started_at.take() else {
+            return;
+        };
+        let seconds = started_at.elapsed().as_secs().max(1);
+
+        if let Ok(conn) = Database::get_connection() {
+            let database = Database::new(&conn);
+            if let Err(error) = database.record_reading_time(&self.manga_id, &self.current_chapter.id, seconds) {
+                write_to_error_log(ErrorType::Error(Box::new(error)));
+            }
+        }
+    }
+
     pub fn exit(&mut self) {
+        self.finish_reading_session();
         if self.auto_bookmark {
             self.bookmark_current_chapter()
         }
         self.global_event_tx.as_ref().unwrap().send(Events::GoBackMangaPage).ok();
     }
 
-    fn render_right_panel(&mut self, buf: &mut Buffer, area: Rect, show_reload: bool) {
-        let [instructions_area, information_era, status_area] =
-            Layout::vertical([Constraint::Percentage(20), Constraint::Percentage(20), Constraint::Percentage(20)])
-                .margin(2)
+    fn render_info_panel(&mut self, buf: &mut Buffer, area: Rect, show_reload: bool) {
+        let [summary_area, pages_area, status_area] =
+            Layout::vertical([Constraint::Length(8), Constraint::Fill(1), Constraint::Length(4)])
+                .margin(1)
                 .areas(area);
 
         let mut instructions = vec![
-            Line::from(vec!["Exit reader: ".into(), "<q>/<Backspace>".to_span().style(*INSTRUCTIONS_STYLE)]),
-            Line::from(vec!["Next page: ".into(), "<j>/<l>".to_span().style(*INSTRUCTIONS_STYLE)]),
-            Line::from(vec!["Previous page: ".into(), "<k>/<h>".to_span().style(*INSTRUCTIONS_STYLE)]),
+            Line::from(vec!["Page: ".into(), "<j>/<Down>".to_span().style(*INSTRUCTIONS_STYLE), " next".into()]),
+            Line::from(vec!["Page: ".into(), "<k>/<Up>".to_span().style(*INSTRUCTIONS_STYLE), " previous".into()]),
+            Line::from(vec!["First/last: ".into(), "<g>/<G>".to_span().style(*INSTRUCTIONS_STYLE)]),
             Line::from(vec!["Next chapter: ".into(), "<n>".to_span().style(*INSTRUCTIONS_STYLE)]),
             Line::from(vec!["Previous chapter: ".into(), "<N>".to_span().style(*INSTRUCTIONS_STYLE)]),
+            Line::from(vec!["Panel: ".into(), "<i>".to_span().style(*INSTRUCTIONS_STYLE), " hide/show".into()]),
+            Line::from(vec!["Exit: ".into(), "<q>/<Esc>".to_span().style(*INSTRUCTIONS_STYLE)]),
         ];
 
         if show_reload {
@@ -493,27 +527,47 @@ where
             instructions.push(Line::from(vec!["Bookmark: ".into(), "<m>".to_span().style(*INSTRUCTIONS_STYLE)]));
         }
 
-        Widget::render(List::new(instructions).block(Block::bordered()), instructions_area, buf);
+        Widget::render(List::new(instructions).block(Block::bordered().title("Reader")), summary_area, buf);
 
         let local_badge = if self.api_client.name() == MangaProviders::Local { " [Local]" } else { "" };
+        let page_index = self.current_page_index();
+        let page_total = self.pages.len();
+        let loaded_pages = self.pages.iter().filter(|page| page.image_state.is_some()).count();
+        let failed_pages = self
+            .pages_list
+            .pages
+            .iter()
+            .filter(|page| page.state == PageItemState::FailedLoad)
+            .count();
+        let page_dimensions = self.pages.get(page_index).and_then(|page| page.dimensions);
         let current_chapter_title = format!(
-            "Reading{local_badge}: Vol {} Ch. {} {}",
+            "Reading{local_badge}\nVol {} Ch. {}\n{}\nPage {} / {}\nLoaded {} | Failed {}{}",
             self.current_chapter.volume_number.as_ref().cloned().unwrap_or("none".to_string()),
             self.current_chapter.number,
-            self.current_chapter.title
+            self.current_chapter.title,
+            page_index + 1,
+            page_total,
+            loaded_pages,
+            failed_pages,
+            page_dimensions
+                .map(|(width, height)| format!("\nImage {}x{}", width, height))
+                .unwrap_or_default()
         );
 
         Paragraph::new(current_chapter_title)
             .wrap(Wrap { trim: true })
-            .render(information_era, buf);
+            .block(Block::bordered().title("Stats"))
+            .render(pages_area, buf);
 
         match self.state {
             State::DisplayingChapterNotFound => Paragraph::new("There is no more chapters")
                 .wrap(Wrap { trim: true })
+                .block(Block::bordered().title("Status"))
                 .render(status_area, buf),
             State::ErrorSearchingChapter => {
                 Paragraph::new("error searching chapter, please try again".to_span().style(*ERROR_STYLE))
                     .wrap(Wrap { trim: true })
+                    .block(Block::bordered().title("Status"))
                     .render(status_area, buf)
             },
             State::SearchingChapter => {
@@ -529,6 +583,7 @@ where
 
                 Paragraph::new(message.to_span().style(*INSTRUCTIONS_STYLE))
                     .wrap(Wrap { trim: true })
+                    .block(Block::bordered().title("Status"))
                     .render(status_area, buf)
             },
             _ => {},
@@ -568,11 +623,17 @@ where
 
     fn handle_key_events(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l') => {
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char(' ') => {
                 self.local_action_tx.send(MangaReaderActions::NextPage).ok();
             },
-            KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h') => {
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k') => {
                 self.local_action_tx.send(MangaReaderActions::PreviousPage).ok();
+            },
+            KeyCode::Char('g') => {
+                self.local_action_tx.send(MangaReaderActions::FirstPage).ok();
+            },
+            KeyCode::Char('G') => {
+                self.local_action_tx.send(MangaReaderActions::LastPage).ok();
             },
             KeyCode::Char('n') => {
                 self.local_action_tx.send(MangaReaderActions::SearchNextChapter).ok();
@@ -583,12 +644,15 @@ where
             KeyCode::Char('r') => {
                 self.local_action_tx.send(MangaReaderActions::ReloadPage).ok();
             },
+            KeyCode::Char('i') => {
+                self.local_action_tx.send(MangaReaderActions::ToggleInfoPanel).ok();
+            },
             KeyCode::Char('m') => {
                 if !self.auto_bookmark {
                     self.local_action_tx.send(MangaReaderActions::BookMarkCurrentChapter).ok();
                 }
             },
-            KeyCode::Char('q') | KeyCode::Backspace => {
+            KeyCode::Char('q') | KeyCode::Esc | KeyCode::Backspace => {
                 self.local_action_tx.send(MangaReaderActions::ExitReaderPage).ok();
             },
             _ => {},
@@ -708,6 +772,31 @@ fn centered_image_area(area: Rect, width: u32, height: u32) -> Rect {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct ReaderCanvas {
+    image_area: Rect,
+    panel_area: Option<Rect>,
+}
+
+impl ReaderCanvas {
+    fn new(area: Rect, show_info_panel: bool) -> Self {
+        if !show_info_panel || area.width < 100 || area.height < 12 {
+            return Self {
+                image_area: area,
+                panel_area: None,
+            };
+        }
+
+        let panel_width = area.width.clamp(24, 32).min(area.width / 3);
+        let [image_area, panel_area] = Layout::horizontal([Constraint::Min(20), Constraint::Length(panel_width)]).areas(area);
+
+        Self {
+            image_area,
+            panel_area: Some(panel_area),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::error::Error;
@@ -762,6 +851,26 @@ mod test {
         let action = reader_page.local_action_rx.recv().await.unwrap();
 
         assert_eq!(MangaReaderActions::PreviousPage, action);
+
+        press_key(&mut reader_page, KeyCode::Char('g'));
+        let action = reader_page.local_action_rx.recv().await.unwrap();
+
+        assert_eq!(MangaReaderActions::FirstPage, action);
+
+        press_key(&mut reader_page, KeyCode::Char('G'));
+        let action = reader_page.local_action_rx.recv().await.unwrap();
+
+        assert_eq!(MangaReaderActions::LastPage, action);
+
+        press_key(&mut reader_page, KeyCode::Char('i'));
+        let action = reader_page.local_action_rx.recv().await.unwrap();
+
+        assert_eq!(MangaReaderActions::ToggleInfoPanel, action);
+
+        press_key(&mut reader_page, KeyCode::Char('h'));
+        press_key(&mut reader_page, KeyCode::Char('l'));
+
+        assert!(reader_page.local_action_rx.is_empty());
     }
 
     #[tokio::test]
@@ -831,6 +940,33 @@ mod test {
         manga_reader.resize_based_on_image_size(300, 200);
 
         assert_eq!(PageSize::Wide, manga_reader.current_page_size);
+    }
+
+    #[test]
+    fn reader_canvas_uses_most_of_wide_terminal_for_image() {
+        let canvas = ReaderCanvas::new(Rect::new(0, 0, 140, 40), true);
+
+        assert_eq!(Some(Rect::new(108, 0, 32, 40)), canvas.panel_area);
+        assert_eq!(Rect::new(0, 0, 108, 40), canvas.image_area);
+    }
+
+    #[test]
+    fn reader_canvas_uses_full_terminal_when_narrow_or_hidden() {
+        let narrow = ReaderCanvas::new(Rect::new(0, 0, 90, 30), true);
+        let hidden = ReaderCanvas::new(Rect::new(0, 0, 140, 40), false);
+
+        assert_eq!(None, narrow.panel_area);
+        assert_eq!(Rect::new(0, 0, 90, 30), narrow.image_area);
+        assert_eq!(None, hidden.panel_area);
+        assert_eq!(Rect::new(0, 0, 140, 40), hidden.image_area);
+    }
+
+    #[test]
+    fn centered_image_area_fits_portrait_and_landscape_images() {
+        let area = Rect::new(0, 0, 100, 40);
+
+        assert_eq!(Rect::new(40, 0, 20, 40), centered_image_area(area, 1000, 2000));
+        assert_eq!(Rect::new(0, 7, 100, 25), centered_image_area(area, 2000, 500));
     }
 
     #[test]
