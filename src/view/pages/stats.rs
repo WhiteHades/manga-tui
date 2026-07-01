@@ -325,10 +325,10 @@ where
             .map_err(|error| error.to_string())
             .and_then(|result| result);
 
-            if reload_result.is_ok()
-                && let Some(tx) = global_tx
-            {
-                tx.send(Events::LocalLibraryReloaded).ok();
+            if reload_result.is_ok() {
+                if let Some(tx) = global_tx {
+                    tx.send(Events::LocalLibraryReloaded).ok();
+                }
             }
 
             local_tx.send(StatsEvents::Reloaded(reload_result)).ok();
