@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
@@ -34,6 +34,7 @@ const LOCAL_CACHE_DIR: &str = "localCache";
 pub struct LocalLibraryStats {
     pub library_path: PathBuf,
     pub manga_count: usize,
+    pub volume_count: usize,
     pub chapter_count: usize,
     pub page_count: usize,
     pub image_folder_count: usize,
@@ -149,6 +150,7 @@ struct LocalChapter {
     id: String,
     title: String,
     number: String,
+    volume: Option<String>,
     source_path: PathBuf,
     format: LocalChapterFormat,
     pages: Vec<LocalPage>,
@@ -252,7 +254,7 @@ impl LocalProvider {
             id: chapter.id.clone(),
             title: chapter.title.clone(),
             number: chapter.number.parse().unwrap_or(1.0),
-            volume_number: Some("1".to_string()),
+            volume_number: chapter.volume.clone(),
             num_page_bookmarked: page_bookmarked,
             language: Languages::English,
             pages_url: chapter.pages.iter().map(|page| page.url.clone()).collect(),
@@ -260,21 +262,27 @@ impl LocalProvider {
     }
 
     fn list_of_chapters(manga: &LocalManga) -> ListOfChapters {
+        let mut grouped_chapters: BTreeMap<String, Vec<super::ChapterReader>> = BTreeMap::new();
+        for chapter in &manga.chapters {
+            let volume = chapter.volume.clone().unwrap_or_else(|| "none".to_string());
+            grouped_chapters.entry(volume.clone()).or_default().push(super::ChapterReader {
+                id: chapter.id.clone(),
+                number: chapter.number.clone(),
+                volume,
+            });
+        }
+
+        let mut volumes: Vec<Volumes> = grouped_chapters
+            .into_iter()
+            .map(|(volume, chapters)| Volumes {
+                volume,
+                chapters: SortedChapters::new(chapters),
+            })
+            .collect();
+        volumes.sort_by(|a, b| chapter_number_cmp(&a.volume, &b.volume));
+
         ListOfChapters {
-            volumes: SortedVolumes::new(vec![Volumes {
-                volume: "1".to_string(),
-                chapters: SortedChapters::new(
-                    manga
-                        .chapters
-                        .iter()
-                        .map(|chapter| super::ChapterReader {
-                            id: chapter.id.clone(),
-                            number: chapter.number.clone(),
-                            volume: "1".to_string(),
-                        })
-                        .collect(),
-                ),
-            }]),
+            volumes: SortedVolumes::new(volumes),
         }
     }
 
@@ -316,7 +324,7 @@ impl LocalProvider {
             title: chapter.title.clone(),
             language: Languages::English,
             chapter_number: chapter.number.clone(),
-            volume_number: Some("1".to_string()),
+            volume_number: chapter.volume.clone(),
             scanlator: Some("Local".to_string()),
             publication_date: None,
         }
@@ -517,7 +525,7 @@ impl FeedPageProvider for LocalProvider {
                 title: chapter.title.clone(),
                 language: Languages::English,
                 chapter_number: chapter.number.clone(),
-                volume_number: Some("1".to_string()),
+                volume_number: chapter.volume.clone(),
                 publication_date: None,
             })
             .collect())
@@ -550,10 +558,14 @@ fn build_library_index(
 
     for (manga_index_value, manga) in mangas.iter().enumerate() {
         manga_index.insert(manga.id.clone(), manga_index_value);
+        let mut volumes = HashSet::new();
 
         for chapter in &manga.chapters {
             stats.chapter_count += 1;
             stats.page_count += chapter.pages.len();
+            if let Some(volume) = chapter.volume.as_ref() {
+                volumes.insert(volume.clone());
+            }
 
             match chapter.format {
                 LocalChapterFormat::ImageFolder => stats.image_folder_count += 1,
@@ -579,6 +591,7 @@ fn build_library_index(
                 page_sources.insert(page.url.to_string(), page.source.clone());
             }
         }
+        stats.volume_count += volumes.len();
     }
 
     stats.total_bytes = counted_bytes
@@ -601,22 +614,32 @@ fn scan_path(path: &Path) -> Result<Vec<LocalManga>, Box<dyn Error>> {
 
 fn scan_directory(path: &Path) -> Result<Vec<LocalManga>, Box<dyn Error>> {
     let direct_images = collect_images_shallow(path)?;
-    if !direct_images.is_empty() {
+    let direct_archives = collect_archives_shallow(path)?;
+    let chapter_dirs = collect_chapter_dirs(path)?;
+    let volume_dirs = collect_volume_dirs(path)?;
+
+    if !direct_images.is_empty() && direct_archives.is_empty() && chapter_dirs.is_empty() && volume_dirs.is_empty() {
         return Ok(vec![manga_from_image_folder(path, direct_images)?]);
     }
 
-    let direct_archives = collect_archives_shallow(path)?;
-    let chapter_dirs = collect_chapter_dirs(path)?;
-
-    if !direct_archives.is_empty() || !chapter_dirs.is_empty() {
+    if !direct_archives.is_empty() || !chapter_dirs.is_empty() || !volume_dirs.is_empty() {
         let manga_id = local_id(path);
         let mut chapters = vec![];
 
         for source in chapter_dirs.into_iter().chain(direct_archives.into_iter()) {
             let number = chapters.len() + 1;
-            chapters.push(chapter_from_source(&source, &manga_id, number)?);
+            chapters.push(chapter_from_source(&source, &manga_id, number, None)?);
         }
-        chapters.sort_by(|a, b| chapter_number_cmp(&a.number, &b.number));
+
+        for volume_dir in volume_dirs {
+            let volume = volume_number_from_path(&volume_dir);
+            let sources = collect_chapter_sources_shallow(&volume_dir)?;
+            for source in sources {
+                let number = chapters.len() + 1;
+                chapters.push(chapter_from_source(&source, &manga_id, number, volume.clone())?);
+            }
+        }
+        chapters.sort_by(local_chapter_cmp);
 
         let cover_img_url = find_cover_url(path)?
             .or_else(|| {
@@ -659,7 +682,7 @@ fn manga_from_single_source(path: &Path) -> Result<LocalManga, Box<dyn Error>> {
     }
 
     let manga_id = local_id(path);
-    let chapter = chapter_from_source(path, &manga_id, 1)?;
+    let chapter = chapter_from_source(path, &manga_id, 1, None)?;
     let cover_img_url = find_cover_url(path)?
         .or_else(|| chapter.pages.first().map(|page| page.url.to_string()))
         .unwrap_or_default();
@@ -675,7 +698,7 @@ fn manga_from_single_source(path: &Path) -> Result<LocalManga, Box<dyn Error>> {
 
 fn manga_from_image_folder(path: &Path, images: Vec<PathBuf>) -> Result<LocalManga, Box<dyn Error>> {
     let manga_id = local_id(path);
-    let chapter = chapter_from_images(path, &manga_id, 1, images)?;
+    let chapter = chapter_from_images(path, &manga_id, 1, None, images)?;
     let cover_img_url = find_cover_url(path)?
         .or_else(|| chapter.pages.first().map(|page| page.url.to_string()))
         .unwrap_or_default();
@@ -689,18 +712,19 @@ fn manga_from_image_folder(path: &Path, images: Vec<PathBuf>) -> Result<LocalMan
     })
 }
 
-fn chapter_from_source(path: &Path, manga_id: &str, number: usize) -> Result<LocalChapter, Box<dyn Error>> {
+fn chapter_from_source(path: &Path, manga_id: &str, number: usize, volume: Option<String>) -> Result<LocalChapter, Box<dyn Error>> {
     if path.is_dir() {
-        return chapter_from_images(path, manga_id, number, collect_images_recursive(path)?);
+        return chapter_from_images(path, manga_id, number, volume, collect_images_recursive(path)?);
     }
 
-    chapter_from_archive(path, manga_id, number)
+    chapter_from_archive(path, manga_id, number, volume)
 }
 
 fn chapter_from_images(
     source_path: &Path,
     manga_id: &str,
     number: usize,
+    default_volume: Option<String>,
     images: Vec<PathBuf>,
 ) -> Result<LocalChapter, Box<dyn Error>> {
     if images.is_empty() {
@@ -720,17 +744,25 @@ fn chapter_from_images(
         })
         .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
 
+    let chapter_numbers = chapter_numbers_from_path(source_path, number, default_volume);
+
     Ok(LocalChapter {
         id: local_id(source_path),
         title: title_from_path(source_path),
-        number: chapter_number_from_path(source_path, number),
+        number: chapter_numbers.chapter,
+        volume: chapter_numbers.volume,
         source_path: source_path.to_path_buf(),
         format: LocalChapterFormat::ImageFolder,
         pages,
     })
 }
 
-fn chapter_from_archive(path: &Path, manga_id: &str, number: usize) -> Result<LocalChapter, Box<dyn Error>> {
+fn chapter_from_archive(
+    path: &Path,
+    manga_id: &str,
+    number: usize,
+    default_volume: Option<String>,
+) -> Result<LocalChapter, Box<dyn Error>> {
     let chapter_id = local_id(path);
     let format = LocalChapterFormat::try_from_path(path)?;
     let entries = archive_image_entries(path, format)?;
@@ -765,10 +797,13 @@ fn chapter_from_archive(path: &Path, manga_id: &str, number: usize) -> Result<Lo
         })
         .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
 
+    let chapter_numbers = chapter_numbers_from_path(path, number, default_volume);
+
     Ok(LocalChapter {
         id: chapter_id,
         title: title_from_path(path),
-        number: chapter_number_from_path(path, number),
+        number: chapter_numbers.chapter,
+        volume: chapter_numbers.volume,
         source_path: path.to_path_buf(),
         format,
         pages,
@@ -927,11 +962,36 @@ fn collect_chapter_dirs(path: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
     let mut dirs = vec![];
     for entry in sorted_dir_entries(path)? {
         let path = entry.path();
-        if path.is_dir() && !collect_images_shallow(&path)?.is_empty() {
+        if path.is_dir() && !looks_like_volume_path(&path) && !collect_images_shallow(&path)?.is_empty() {
             dirs.push(path);
         }
     }
     Ok(dirs)
+}
+
+fn collect_volume_dirs(path: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut dirs = vec![];
+    for entry in sorted_dir_entries(path)? {
+        let path = entry.path();
+        if path.is_dir() && looks_like_volume_path(&path) && !collect_chapter_sources_shallow(&path)?.is_empty() {
+            dirs.push(path);
+        }
+    }
+    Ok(dirs)
+}
+
+fn collect_chapter_sources_shallow(path: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut sources = vec![];
+    for entry in sorted_dir_entries(path)? {
+        let path = entry.path();
+        if path.is_file() && is_supported_archive(&path) {
+            sources.push(path);
+        } else if path.is_dir() && !collect_images_shallow(&path)?.is_empty() {
+            sources.push(path);
+        }
+    }
+    sources.sort_by(|a, b| natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()));
+    Ok(sources)
 }
 
 fn collect_archives_shallow(path: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
@@ -1021,9 +1081,56 @@ fn title_from_path(path: &Path) -> String {
         .replace(['_', '-'], " ")
 }
 
-fn chapter_number_from_path(path: &Path, fallback: usize) -> String {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalChapterNumbers {
+    volume: Option<String>,
+    chapter: String,
+}
+
+fn chapter_numbers_from_path(path: &Path, fallback: usize, default_volume: Option<String>) -> LocalChapterNumbers {
     let title = title_from_path(path);
-    first_number(&title).unwrap_or_else(|| fallback.to_string())
+    let volume = volume_number_from_title(&title).or(default_volume);
+    let chapter = chapter_number_from_title(&title)
+        .or_else(|| number_after_volume(&title, volume.as_deref()))
+        .unwrap_or_else(|| fallback.to_string());
+
+    LocalChapterNumbers { volume, chapter }
+}
+
+fn volume_number_from_path(path: &Path) -> Option<String> {
+    volume_number_from_title(&title_from_path(path))
+}
+
+fn volume_number_from_title(title: &str) -> Option<String> {
+    number_after_keywords(title, &["volume", "vol", "v"])
+}
+
+fn chapter_number_from_title(title: &str) -> Option<String> {
+    number_after_keywords(title, &["chapter", "chap", "ch", "c"])
+}
+
+fn number_after_volume(title: &str, volume: Option<&str>) -> Option<String> {
+    let numbers = all_numbers(title);
+    match volume {
+        Some(volume) => numbers.into_iter().find(|number| number != volume),
+        None => numbers.into_iter().next(),
+    }
+}
+
+fn looks_like_volume_path(path: &Path) -> bool {
+    let title = title_from_path(path).to_ascii_lowercase();
+    ["volume", "vol", "vol.", "v"]
+        .iter()
+        .any(|keyword| title.split_whitespace().any(|part| part == *keyword))
+        || title.strip_prefix("vol").is_some_and(starts_with_number_marker)
+        || title.starts_with('v') && title.chars().nth(1).is_some_and(|char| char.is_ascii_digit())
+}
+
+fn starts_with_number_marker(value: &str) -> bool {
+    value
+        .chars()
+        .next()
+        .is_some_and(|character| character == '.' || character.is_ascii_digit())
 }
 
 fn first_number(value: &str) -> Option<String> {
@@ -1040,6 +1147,70 @@ fn first_number(value: &str) -> Option<String> {
     }
 
     (!number.is_empty()).then_some(number)
+}
+
+fn number_after_keywords(value: &str, keywords: &[&str]) -> Option<String> {
+    let normalized = normalize_number_tokens(value);
+    let tokens: Vec<&str> = normalized.split_whitespace().collect();
+
+    for (index, token) in tokens.iter().enumerate() {
+        let token = token.trim_matches('.');
+        if keywords.contains(&token)
+            && let Some(number) = tokens.get(index + 1).and_then(|token| first_number(token))
+        {
+            return Some(number);
+        }
+    }
+
+    for keyword in keywords {
+        let compact_prefix = format!("{keyword}.");
+        for token in &tokens {
+            let token = token.trim_matches(['[', ']', '(', ')']);
+            if let Some(rest) = token.strip_prefix(keyword).or_else(|| token.strip_prefix(&compact_prefix))
+                && let Some(number) = first_number(rest)
+            {
+                return Some(number);
+            }
+        }
+    }
+
+    None
+}
+
+fn normalize_number_tokens(value: &str) -> String {
+    value
+        .to_ascii_lowercase()
+        .chars()
+        .map(|character| match character {
+            '_' | '-' | '[' | ']' | '(' | ')' => ' ',
+            _ => character,
+        })
+        .collect()
+}
+
+fn all_numbers(value: &str) -> Vec<String> {
+    let mut numbers = vec![];
+    let mut current = String::new();
+
+    for character in value.chars() {
+        if character.is_ascii_digit() || (!current.is_empty() && character == '.') {
+            current.push(character);
+        } else if !current.is_empty() {
+            numbers.push(std::mem::take(&mut current));
+        }
+    }
+
+    if !current.is_empty() {
+        numbers.push(current);
+    }
+
+    numbers
+}
+
+fn local_chapter_cmp(a: &LocalChapter, b: &LocalChapter) -> Ordering {
+    chapter_number_cmp(a.volume.as_deref().unwrap_or("0"), b.volume.as_deref().unwrap_or("0"))
+        .then_with(|| chapter_number_cmp(&a.number, &b.number))
+        .then_with(|| natural_cmp(&a.title, &b.title))
 }
 
 fn chapter_number_cmp(a: &str, b: &str) -> Ordering {
@@ -1212,6 +1383,63 @@ mod tests {
         assert_eq!("Chapter 2", manga.chapters[1].title);
 
         Ok(())
+    }
+
+    #[test]
+    fn scans_volume_folders_as_one_manga_with_volume_numbers() -> Result<(), Box<dyn Error>> {
+        let dir = TestDir::new("volume-folders");
+        let manga_dir = dir.path.join("Series");
+
+        write_png(&manga_dir.join("Vol 2").join("Chapter 10").join("1.png"))?;
+        write_png(&manga_dir.join("Vol 1").join("Chapter 1").join("1.png"))?;
+
+        let provider = LocalProvider::from_path(&manga_dir)?;
+        let manga = &provider.mangas()[0];
+
+        assert_eq!(1, provider.mangas().len());
+        assert_eq!(2, manga.chapters.len());
+        assert_eq!(Some("1".to_string()), manga.chapters[0].volume);
+        assert_eq!("1", manga.chapters[0].number);
+        assert_eq!(Some("2".to_string()), manga.chapters[1].volume);
+        assert_eq!("10", manga.chapters[1].number);
+        assert_eq!(2, provider.library_stats().volume_count);
+
+        let list = LocalProvider::list_of_chapters(manga);
+        assert_eq!(2, list.volumes.as_slice().len());
+        assert_eq!("1", list.volumes.as_slice()[0].volume);
+        assert_eq!("2", list.volumes.as_slice()[1].volume);
+
+        Ok(())
+    }
+
+    #[test]
+    fn cover_image_does_not_turn_manga_folder_into_image_chapter() -> Result<(), Box<dyn Error>> {
+        let dir = TestDir::new("cover-with-chapters");
+        let manga_dir = dir.path.join("Series");
+
+        write_png(&manga_dir.join("cover.jpg"))?;
+        write_png(&manga_dir.join("Chapter 1").join("1.png"))?;
+        write_png(&manga_dir.join("Chapter 2").join("1.png"))?;
+
+        let provider = LocalProvider::from_path(&manga_dir)?;
+        let manga = &provider.mangas()[0];
+
+        assert_eq!(2, manga.chapters.len());
+        assert!(manga.cover_img_url.ends_with("cover.jpg"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_volume_and_chapter_numbers_from_names() {
+        assert_eq!(Some("2".to_string()), volume_number_from_title("Vol. 2 Chapter 10"));
+        assert_eq!(Some("10".to_string()), chapter_number_from_title("Vol. 2 Chapter 10"));
+
+        let parsed = chapter_numbers_from_path(Path::new("Volume 03 - 012.cbz"), 1, None);
+
+        assert_eq!(Some("03".to_string()), parsed.volume);
+        assert_eq!("012", parsed.chapter);
+        assert!(!looks_like_volume_path(Path::new("Volcano Arc")));
     }
 
     #[test]
