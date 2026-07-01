@@ -442,7 +442,7 @@ impl MangaPageProvider for LocalProvider {
         &self,
         manga_id: &str,
         filters: ChapterFilters,
-        pagination: Pagination,
+        _pagination: Pagination,
     ) -> Result<GetChaptersResponse, Box<dyn Error>> {
         let manga = self.find_manga(manga_id)?;
         let mut chapters: Vec<Chapter> = manga.chapters.iter().map(|chapter| Self::to_chapter(manga_id, chapter)).collect();
@@ -452,9 +452,6 @@ impl MangaPageProvider for LocalProvider {
         }
 
         let total_chapters = chapters.len() as u32;
-        let from = pagination.index_to_slice_from();
-        let to = pagination.to_index(chapters.len());
-        let chapters = chapters.get(from..to).unwrap_or(&[]).to_vec();
 
         Ok(GetChaptersResponse {
             chapters,
@@ -1408,6 +1405,38 @@ mod tests {
         assert_eq!(2, list.volumes.as_slice().len());
         assert_eq!("1", list.volumes.as_slice()[0].volume);
         assert_eq!("2", list.volumes.as_slice()[1].volume);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn local_manga_page_returns_all_volume_chapters() -> Result<(), Box<dyn Error>> {
+        let dir = TestDir::new("volume-chapter-list");
+        let manga_dir = dir.path.join("Series");
+
+        for volume in 1..=2 {
+            for chapter in 1..=9 {
+                write_png(&manga_dir.join(format!("Vol {volume}")).join(format!("Chapter {chapter}")).join("1.png"))?;
+            }
+        }
+
+        let provider = LocalProvider::from_path(&manga_dir)?;
+        let manga_id = provider.mangas()[0].id.clone();
+        let response = provider
+            .get_chapters(
+                &manga_id,
+                ChapterFilters {
+                    order: ChapterOrderBy::Ascending,
+                    ..Default::default()
+                },
+                Pagination::default(),
+            )
+            .await?;
+
+        assert_eq!(18, response.total_chapters);
+        assert_eq!(18, response.chapters.len());
+        assert_eq!(Some("1".to_string()), response.chapters[0].volume_number);
+        assert_eq!(Some("2".to_string()), response.chapters[9].volume_number);
 
         Ok(())
     }

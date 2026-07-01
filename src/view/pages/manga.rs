@@ -522,13 +522,27 @@ where
 
     fn scroll_chapter_down(&mut self) {
         if let Some(chapters) = self.chapters.as_mut() {
-            chapters.state.next();
+            let total = chapters.widget.chapters.len();
+            if total == 0 {
+                chapters.state.select(None);
+                return;
+            }
+
+            let current = chapters.state.selected.unwrap_or(0);
+            chapters.state.select(Some((current + 1).min(total - 1)));
         }
     }
 
     fn scroll_chapter_up(&mut self) {
         if let Some(chapters) = self.chapters.as_mut() {
-            chapters.state.previous();
+            let total = chapters.widget.chapters.len();
+            if total == 0 {
+                chapters.state.select(None);
+                return;
+            }
+
+            let current = chapters.state.selected.unwrap_or(0);
+            chapters.state.select(Some(current.saturating_sub(1)));
         }
     }
 
@@ -830,25 +844,37 @@ where
         match response {
             Some(response) => {
                 let mut list_state = tui_widget_list::ListState::default();
+                let loaded_chapters = response.chapters.len() as u32;
 
-                list_state.select(Some(0));
+                if loaded_chapters > 0 {
+                    list_state.select(Some(0));
+                }
 
                 let chapter_widget = ChaptersListWidget::from_response(response.chapters);
-
-                let chapters = match &self.chapters {
-                    Some(chapters) => Some(ChaptersData {
-                        state: list_state,
-                        widget: chapter_widget,
-                        pagination: chapters.pagination.clone(),
-                    }),
-                    None => Some(ChaptersData {
-                        state: list_state,
-                        widget: chapter_widget,
-                        pagination: Pagination::from_total_items(response.total_chapters),
-                    }),
+                let pagination = match &self.chapters {
+                    Some(chapters) => {
+                        let mut pagination = chapters.pagination.clone();
+                        pagination.total_items = response.total_chapters;
+                        if loaded_chapters == response.total_chapters {
+                            pagination.current_page = 1;
+                            pagination.items_per_page = loaded_chapters.max(1);
+                        }
+                        pagination
+                    },
+                    None => {
+                        if loaded_chapters == response.total_chapters {
+                            Pagination::new(1, response.total_chapters, loaded_chapters.max(1))
+                        } else {
+                            Pagination::from_total_items(response.total_chapters)
+                        }
+                    },
                 };
 
-                self.chapters = chapters;
+                self.chapters = Some(ChaptersData {
+                    state: list_state,
+                    widget: chapter_widget,
+                    pagination,
+                });
                 self.local_event_tx.send(MangaPageEvents::CheckChapterStatus).ok();
             },
             None => {
@@ -1207,6 +1233,17 @@ mod test {
         }
     }
 
+    fn numbered_chapters(count: usize) -> Vec<Chapter> {
+        (1..=count)
+            .map(|number| Chapter {
+                id: format!("chapter-{number}"),
+                title: format!("Chapter {number}"),
+                chapter_number: number.to_string(),
+                ..Default::default()
+            })
+            .collect()
+    }
+
     fn render_chapters<T: MangaPageProvider, S: MangaTracker>(manga_page: &mut MangaPage<T, S>) {
         let area = Rect::new(0, 0, 50, 50);
         let mut buf = Buffer::empty(area);
@@ -1467,6 +1504,33 @@ mod test {
         manga_page.update(action);
 
         assert!(!manga_page.download_process_started());
+    }
+
+    #[test]
+    fn scrolls_chapters_before_widget_render_initializes_state() {
+        let mut manga_page: MangaPage<MockMangaPageProvider, TrackerTest> =
+            MangaPage::new(Manga::default(), None, MockMangaPageProvider::new().into());
+
+        manga_page.load_chapters(Some(GetChaptersResponse {
+            chapters: numbered_chapters(3),
+            total_chapters: 3,
+        }));
+
+        assert_eq!(0, manga_page.get_index_chapter_selected());
+
+        manga_page.scroll_chapter_down();
+        assert_eq!(1, manga_page.get_index_chapter_selected());
+
+        manga_page.scroll_chapter_down();
+        assert_eq!(2, manga_page.get_index_chapter_selected());
+
+        manga_page.scroll_chapter_down();
+        assert_eq!(2, manga_page.get_index_chapter_selected());
+
+        manga_page.scroll_chapter_up();
+        assert_eq!(1, manga_page.get_index_chapter_selected());
+
+        assert_eq!(1, manga_page.get_chapter_data().pagination.get_total_pages());
     }
 
     #[test]

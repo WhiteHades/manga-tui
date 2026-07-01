@@ -396,9 +396,9 @@ where
         let instructions = Line::from(vec![
             "Recently indexed | ".into(),
             "Move right ".into(),
-            Span::raw("<Right>").style(*INSTRUCTIONS_STYLE),
+            Span::raw("<l>/<Right>").style(*INSTRUCTIONS_STYLE),
             " Move left ".into(),
-            Span::raw(" <Left> ").style(*INSTRUCTIONS_STYLE),
+            Span::raw(" <h>/<Left> ").style(*INSTRUCTIONS_STYLE),
             " Read ".into(),
             Span::raw("<Enter>").style(*INSTRUCTIONS_STYLE),
         ]);
@@ -451,10 +451,10 @@ where
             KeyCode::Char('o') => {
                 self.local_action_tx.send(HomeActions::GoToPopularMangaPage).ok();
             },
-            KeyCode::Right => {
+            KeyCode::Char('l') | KeyCode::Right => {
                 self.local_action_tx.send(HomeActions::SelectNextRecentlyAddedManga).ok();
             },
-            KeyCode::Left => {
+            KeyCode::Char('h') | KeyCode::Left => {
                 self.local_action_tx.send(HomeActions::SelectPreviousRecentlyAddedManga).ok();
             },
             KeyCode::Enter => {
@@ -504,5 +504,20 @@ mod tests {
         home.load_recently_added_mangas(Some(vec![RecentlyAddedManga::default()]));
 
         assert!(home.local_event_rx.is_empty());
+    }
+
+    #[test]
+    fn vim_horizontal_keys_select_recently_added_manga() {
+        let mut home: Home<MockMangaPageProvider> = Home::new(None, MockMangaPageProvider::new().into());
+
+        home.handle_key_events(KeyCode::Char('l').into());
+        let action = home.local_action_rx.blocking_recv().expect("missing action");
+
+        assert_eq!(HomeActions::SelectNextRecentlyAddedManga, action);
+
+        home.handle_key_events(KeyCode::Char('h').into());
+        let action = home.local_action_rx.blocking_recv().expect("missing action");
+
+        assert_eq!(HomeActions::SelectPreviousRecentlyAddedManga, action);
     }
 }

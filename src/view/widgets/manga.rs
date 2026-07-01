@@ -60,8 +60,10 @@ impl Widget for ChapterItem {
 
         let information = if self.is_bookmarked {
             "Bookmarked | ".to_string()
+        } else if let Some(volume) = self.chapter.volume_number {
+            format!("Vol. {volume} Ch. {} | ", self.chapter.chapter_number)
         } else {
-            format!("Vol. {} Ch. {} | ", self.chapter.volume_number.unwrap_or_default(), self.chapter.chapter_number)
+            format!("Ch. {} | ", self.chapter.chapter_number)
         };
 
         Paragraph::new(Line::from(vec![information.into(), self.chapter.title.into()]))

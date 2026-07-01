@@ -75,7 +75,7 @@ Reloading swaps the shared local index and clears stale Library/Search/Manga/Rea
 | Area | Keys |
 | --- | --- |
 | App | `gh` Library, `gs` Search, `gt` Stats, `q` quit |
-| Lists | `j`/`k` or arrows move, `Enter` opens |
+| Lists | `j`/`k` move vertically, `h`/`l` move horizontal carousels, arrows also work, `Enter` opens |
 | Search | `/` type, `Enter` search, `Esc` stop typing |
 | Pagination | `Ctrl-d` next page, `Ctrl-u` previous page |
 | Manga page | `Enter` read, `B` read bookmarked, `m` bookmark, `d` download chapter, `a` download all, `L` languages |
