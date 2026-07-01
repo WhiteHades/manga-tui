@@ -1155,10 +1155,10 @@ fn number_after_keywords(value: &str, keywords: &[&str]) -> Option<String> {
 
     for (index, token) in tokens.iter().enumerate() {
         let token = token.trim_matches('.');
-        if keywords.contains(&token)
-            && let Some(number) = tokens.get(index + 1).and_then(|token| first_number(token))
-        {
-            return Some(number);
+        if keywords.contains(&token) {
+            if let Some(number) = tokens.get(index + 1).and_then(|token| first_number(token)) {
+                return Some(number);
+            }
         }
     }
 
@@ -1166,10 +1166,10 @@ fn number_after_keywords(value: &str, keywords: &[&str]) -> Option<String> {
         let compact_prefix = format!("{keyword}.");
         for token in &tokens {
             let token = token.trim_matches(['[', ']', '(', ')']);
-            if let Some(rest) = token.strip_prefix(keyword).or_else(|| token.strip_prefix(&compact_prefix))
-                && let Some(number) = first_number(rest)
-            {
-                return Some(number);
+            if let Some(rest) = token.strip_prefix(keyword).or_else(|| token.strip_prefix(&compact_prefix)) {
+                if let Some(number) = first_number(rest) {
+                    return Some(number);
+                }
             }
         }
     }
