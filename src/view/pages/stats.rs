@@ -1,7 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crossterm::event::{self, KeyCode, KeyEvent};
+use directories::UserDirs;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -13,6 +14,7 @@ use tokio::task::JoinSet;
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
+use crate::backend::database::{Database, ReadingStats};
 use crate::backend::manga_provider::MangaProvider;
 use crate::backend::manga_provider::local::LocalLibraryStats;
 use crate::backend::tui::Events;
@@ -68,7 +70,7 @@ where
         self.tick();
 
         let [summary_area, path_area, detail_area, status_area] =
-            Layout::vertical([Constraint::Length(7), Constraint::Length(4), Constraint::Fill(1), Constraint::Length(4)])
+            Layout::vertical([Constraint::Length(8), Constraint::Length(4), Constraint::Fill(1), Constraint::Length(4)])
                 .margin(1)
                 .areas(area);
 
@@ -112,7 +114,7 @@ where
         let library_path = Input::default().with_value(
             manga_provider
                 .local_library_stats()
-                .map(|stats| stats.library_path.display().to_string())
+                .map(|stats| display_path(&stats.library_path))
                 .unwrap_or_default(),
         );
 
@@ -143,9 +145,15 @@ where
         self.manga_provider.local_library_stats()
     }
 
+    fn reading_stats(&self) -> Option<ReadingStats> {
+        let conn = Database::get_connection().ok()?;
+        let database = Database::new(&conn);
+        database.get_reading_stats(self.manga_provider.name()).ok()
+    }
+
     fn refresh_path_input(&mut self) {
         if let Some(stats) = self.stats() {
-            self.library_path = Input::default().with_value(stats.library_path.display().to_string());
+            self.library_path = Input::default().with_value(display_path(&stats.library_path));
         }
     }
 
@@ -159,6 +167,7 @@ where
 
         let items = [
             Line::from(vec!["Manga: ".into(), stats.manga_count.to_string().yellow()]),
+            Line::from(vec!["Volumes: ".into(), stats.volume_count.to_string().yellow()]),
             Line::from(vec!["Chapters: ".into(), stats.chapter_count.to_string().yellow()]),
             Line::from(vec!["Pages: ".into(), stats.page_count.to_string().yellow()]),
             Line::from(vec!["Library size: ".into(), human_bytes(stats.total_bytes).yellow()]),
@@ -194,7 +203,8 @@ where
             return;
         };
 
-        let [format_area, note_area] = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)]).areas(area);
+        let [format_area, reading_area, note_area] =
+            Layout::horizontal([Constraint::Percentage(30), Constraint::Percentage(35), Constraint::Percentage(35)]).areas(area);
         let format_lines = [
             Line::from(vec!["Image folders: ".into(), stats.image_folder_count.to_string().green()]),
             Line::from(vec!["CBZ/ZIP: ".into(), stats.cbz_count.to_string().green()]),
@@ -206,6 +216,23 @@ where
         List::new(format_lines)
             .block(Block::bordered().title("Formats"))
             .render(format_area, frame.buffer_mut());
+
+        let reading_lines = match self.reading_stats() {
+            Some(reading_stats) => vec![
+                Line::from(vec!["Reading manga: ".into(), reading_stats.reading_manga_count.to_string().yellow()]),
+                Line::from(vec!["Plan to read: ".into(), reading_stats.plan_to_read_count.to_string().yellow()]),
+                Line::from(vec!["Read chapters: ".into(), reading_stats.read_chapter_count.to_string().yellow()]),
+                Line::from(vec!["Downloaded: ".into(), reading_stats.downloaded_chapter_count.to_string().yellow()]),
+                Line::from(vec!["Bookmarks: ".into(), reading_stats.bookmarked_chapter_count.to_string().yellow()]),
+                Line::from(vec!["Reading time: ".into(), human_duration(reading_stats.total_read_seconds).yellow()]),
+                Line::from(vec!["Last read: ".into(), reading_stats.last_read_at.unwrap_or_else(|| "never".to_string()).yellow()]),
+            ],
+            None => vec![Line::from("Reading stats unavailable")],
+        };
+
+        List::new(reading_lines)
+            .block(Block::bordered().title("Reading stats"))
+            .render(reading_area, frame.buffer_mut());
 
         Paragraph::new(Line::from(vec!["Archives are indexed without full extraction. Pages are read lazily when opened.".into()]))
             .wrap(Wrap { trim: true })
@@ -274,7 +301,7 @@ where
             return;
         }
 
-        self.reload_library(PathBuf::from(value));
+        self.reload_library(expand_path(value));
     }
 
     fn reload_library(&mut self, path: PathBuf) {
@@ -330,7 +357,7 @@ where
         if let Ok(event) = self.local_event_rx.try_recv() {
             match event {
                 StatsEvents::Reloaded(Ok(stats)) => {
-                    self.library_path = Input::default().with_value(stats.library_path.display().to_string());
+                    self.library_path = Input::default().with_value(display_path(&stats.library_path));
                     self.state = StatsState::Reloaded;
                 },
                 StatsEvents::Reloaded(Err(message)) => {
@@ -352,6 +379,38 @@ fn human_bytes(bytes: u64) -> String {
     }
 
     if unit == 0 { format!("{} {}", bytes, UNITS[unit]) } else { format!("{size:.1} {}", UNITS[unit]) }
+}
+
+fn human_duration(seconds: u64) -> String {
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let seconds = seconds % 60;
+
+    match (hours, minutes, seconds) {
+        (0, 0, seconds) => format!("{seconds}s"),
+        (0, minutes, seconds) => format!("{minutes}m {seconds}s"),
+        (hours, minutes, _) => format!("{hours}h {minutes}m"),
+    }
+}
+
+fn display_path(path: &Path) -> String {
+    let Some(home_dir) = UserDirs::new().map(|dirs| dirs.home_dir().to_path_buf()) else {
+        return path.display().to_string();
+    };
+
+    path.strip_prefix(&home_dir)
+        .map(|relative| format!("~/{}", relative.display()))
+        .unwrap_or_else(|_| path.display().to_string())
+}
+
+fn expand_path(value: &str) -> PathBuf {
+    let Some(rest) = value.strip_prefix("~/") else {
+        return PathBuf::from(value);
+    };
+
+    UserDirs::new()
+        .map(|dirs| dirs.home_dir().join(rest))
+        .unwrap_or_else(|| PathBuf::from(value))
 }
 
 #[cfg(test)]
@@ -397,6 +456,13 @@ mod tests {
     }
 
     #[test]
+    fn formats_duration() {
+        assert_eq!("59s", human_duration(59));
+        assert_eq!("2m 5s", human_duration(125));
+        assert_eq!("2h 3m", human_duration(7384));
+    }
+
+    #[test]
     fn renders_local_library_stats() -> Result<(), Box<dyn Error>> {
         let dir = TestDir::new("render");
         fs::write(dir.path.join("page.jpg"), include_bytes!("../../../data_test/images/1.jpg"))?;
@@ -410,7 +476,7 @@ mod tests {
         let output = buffer_text(terminal.backend().buffer());
         assert!(output.contains("Local library"));
         assert!(output.contains("Manga:"));
-        assert!(output.contains(dir.path.to_str().unwrap()));
+        assert!(output.contains("Reading stats"));
         Ok(())
     }
 }

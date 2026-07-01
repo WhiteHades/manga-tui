@@ -15,7 +15,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinSet;
 
 use crate::backend::error_log::{ErrorType, write_to_error_log};
-use crate::backend::manga_provider::{HomePageMangaProvider, PopularManga, RecentlyAddedManga};
+use crate::backend::manga_provider::{HomePageMangaProvider, MangaProvider, PopularManga, RecentlyAddedManga};
 use crate::backend::tui::Events;
 use crate::common::ImageState;
 use crate::global::INSTRUCTIONS_STYLE;
@@ -51,7 +51,7 @@ pub enum HomeActions {
 
 pub struct Home<T>
 where
-    T: HomePageMangaProvider + Sync + Send,
+    T: MangaProvider + Sync + Send,
 {
     carrousel_popular_mangas: PopularMangaCarrousel,
     carrousel_recently_added: RecentlyAddedCarrousel,
@@ -70,7 +70,7 @@ where
 
 impl<T> Component for Home<T>
 where
-    T: HomePageMangaProvider + Sync + Send,
+    T: MangaProvider + Sync + Send,
 {
     type Actions = HomeActions;
 
@@ -120,7 +120,7 @@ where
 
 impl<T> Home<T>
 where
-    T: HomePageMangaProvider + Sync + Send,
+    T: MangaProvider + Sync + Send,
 {
     pub fn new(picker: Option<Picker>, manga_provider: Arc<T>) -> Self {
         let (local_action_tx, local_action_rx) = mpsc::unbounded_channel::<HomeActions>();
@@ -156,9 +156,9 @@ where
 
         let instructions = Line::from(vec![
             "Next ".into(),
-            Span::raw("<j>").style(*INSTRUCTIONS_STYLE),
+            Span::raw("<j>/<Down>").style(*INSTRUCTIONS_STYLE),
             " previous ".into(),
-            Span::raw("<k>").style(*INSTRUCTIONS_STYLE),
+            Span::raw("<k>/<Up>").style(*INSTRUCTIONS_STYLE),
             " open ".into(),
             Span::raw("<o>").style(*INSTRUCTIONS_STYLE),
             format!(
@@ -396,9 +396,9 @@ where
         let instructions = Line::from(vec![
             "Recently indexed | ".into(),
             "Move right ".into(),
-            Span::raw("<l>").style(*INSTRUCTIONS_STYLE),
+            Span::raw("<Right>").style(*INSTRUCTIONS_STYLE),
             " Move left ".into(),
-            Span::raw(" <h> ").style(*INSTRUCTIONS_STYLE),
+            Span::raw(" <Left> ").style(*INSTRUCTIONS_STYLE),
             " Read ".into(),
             Span::raw("<Enter>").style(*INSTRUCTIONS_STYLE),
         ]);
@@ -409,9 +409,22 @@ where
     }
 
     fn render_app_information(&mut self, area: Rect, buf: &mut Buffer) {
-        let layout = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).margin(1).split(area);
+        let layout = Layout::vertical([Constraint::Length(4), Constraint::Fill(1)]).margin(1).split(area);
 
         Block::bordered().render(area, buf);
+
+        let stats_lines = self
+            .manga_provider
+            .local_library_stats()
+            .map(|stats| {
+                vec![
+                    Line::from(vec!["Manga ".into(), stats.manga_count.to_string().into()]),
+                    Line::from(vec!["Volumes ".into(), stats.volume_count.to_string().into()]),
+                    Line::from(vec!["Chapters ".into(), stats.chapter_count.to_string().into()]),
+                    Line::from(vec!["Pages ".into(), stats.page_count.to_string().into()]),
+                ]
+            })
+            .unwrap_or_else(|| vec![Line::from("Stats unavailable")]);
 
         Widget::render(
             List::new([
@@ -421,7 +434,9 @@ where
             ]),
             layout[0],
             buf,
-        )
+        );
+
+        Widget::render(List::new(stats_lines).block(Block::bordered().title("Quick stats")), layout[1], buf);
     }
 
     pub fn handle_key_events(&mut self, key_event: KeyEvent) {
@@ -436,10 +451,10 @@ where
             KeyCode::Char('o') => {
                 self.local_action_tx.send(HomeActions::GoToPopularMangaPage).ok();
             },
-            KeyCode::Char('l') | KeyCode::Right => {
+            KeyCode::Right => {
                 self.local_action_tx.send(HomeActions::SelectNextRecentlyAddedManga).ok();
             },
-            KeyCode::Char('h') | KeyCode::Left => {
+            KeyCode::Left => {
                 self.local_action_tx.send(HomeActions::SelectPreviousRecentlyAddedManga).ok();
             },
             KeyCode::Enter => {
