@@ -87,17 +87,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     stdout().execute(EnableMouseCapture)?;
 
     if !local_path.exists() {
-        logger.error(
-            format!(
-                "Local manga library not found: {}\nSet MANGA_TUI_LIBRARY_DIR or run `manga-tui --local <path>`.",
-                local_path.display()
-            )
-            .into(),
-        );
+        logger.error("Local manga library not found.\nSet MANGA_TUI_LIBRARY_DIR or run `manga-tui --local <path>`.".into());
         exit(1)
     }
 
-    logger.inform(format!("Using local manga from {}", local_path.display()));
+    logger.inform("Using local manga library");
     run_app(
         ratatui::init(),
         LocalProvider::from_path(local_path)?,
