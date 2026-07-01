@@ -229,8 +229,11 @@ pub fn update_database_with_migrations(
     connection: &mut Connection,
     logger: &impl ILogger,
 ) -> rusqlite::Result<Vec<Option<MigrationTable>>> {
-    let migrations: Vec<Option<MigrationTable>> =
-        vec![migrate_version_0_4_0(connection, logger)?, migrate_version_0_6_0(connection, logger)?];
+    let migrations: Vec<Option<MigrationTable>> = vec![
+        migrate_version_0_4_0(connection, logger)?,
+        migrate_version_0_6_0(connection, logger)?,
+        migrate_version_0_7_0(connection, logger)?,
+    ];
 
     Ok(migrations)
 }
@@ -291,6 +294,43 @@ fn migrate_version_0_6_0(connection: &mut Connection, logger: &impl ILogger) -> 
     let migration = Migration::new(&queries)
         .with_name("Add column manga_provider to table mangas")
         .with_version("0.6.0")
+        .up(connection)?;
+
+    let migration_result = match migration {
+        Some(available_migration) => {
+            logger.inform("Updating database");
+            let migration_result = available_migration.update(connection)?;
+            logger.inform("Database updated");
+            Some(migration_result)
+        },
+        None => None,
+    };
+
+    Ok(migration_result)
+}
+
+/// Add accumulated reading-time counters.
+fn migrate_version_0_7_0(connection: &mut Connection, logger: &impl ILogger) -> rusqlite::Result<Option<MigrationTable>> {
+    let queries = [
+        Query::AlterTable {
+            table_name: "mangas",
+            command: AlterTableCommand::Add {
+                column: "read_seconds",
+                data_type: "INTEGER NOT NULL DEFAULT 0",
+            },
+        },
+        Query::AlterTable {
+            table_name: "chapters",
+            command: AlterTableCommand::Add {
+                column: "read_seconds",
+                data_type: "INTEGER NOT NULL DEFAULT 0",
+            },
+        },
+    ];
+
+    let migration = Migration::new(&queries)
+        .with_name("Add reading time counters")
+        .with_version("0.7.0")
         .up(connection)?;
 
     let migration_result = match migration {
@@ -855,10 +895,15 @@ mod tests {
 
         let migrations = update_database_with_migrations(&mut conn, &DefaultLogger)?;
 
-        assert_eq!(2, migrations.len());
+        assert_eq!(3, migrations.len());
 
         assert!(migrations.iter().flatten().any(|migration| migration.version == "0.4.0"));
         assert!(migrations.iter().flatten().any(|migration| migration.version == "0.6.0"));
+        assert!(migrations.iter().flatten().any(|migration| migration.version == "0.7.0"));
+        conn.execute("UPDATE mangas SET read_seconds = 10", [])
+            .expect("Migration did not add expected column `mangas.read_seconds`");
+        conn.execute("UPDATE chapters SET read_seconds = 10", [])
+            .expect("Migration did not add expected column `chapters.read_seconds`");
 
         Ok(())
     }
