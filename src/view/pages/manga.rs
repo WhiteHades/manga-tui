@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 use image::DynamicImage;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span, ToSpan};
 use ratatui::widgets::{Block, Clear, List, ListState, Paragraph, StatefulWidget, Widget, Wrap};
@@ -207,7 +207,7 @@ where
 
     fn render_cover(&mut self, area: Rect, buf: &mut Buffer) {
         let [cover_area, more_details_area] =
-            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(area);
+            Layout::vertical([Constraint::Percentage(72), Constraint::Percentage(28)]).areas(area);
 
         match self.bookmark_state.phase {
             BookmarkPhase::Found => {},
@@ -247,7 +247,7 @@ where
     fn render_manga_information(&mut self, area: Rect, frame: &mut Frame<'_>) {
         let buf = frame.buffer_mut();
 
-        let layout = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]);
+        let layout = Layout::vertical([Constraint::Length(8), Constraint::Fill(1)]);
 
         let [manga_information_area, manga_chapters_area] = layout.areas(area);
 
@@ -279,7 +279,7 @@ where
     }
 
     fn render_details(&mut self, area: Rect, buf: &mut Buffer) {
-        let layout = Layout::vertical([Constraint::Percentage(20), Constraint::Percentage(80)]).margin(1);
+        let layout = Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).margin(1);
         let [tags_area, description_area] = layout.areas(area);
 
         let [tags_area, status_area] =
@@ -299,7 +299,7 @@ where
     }
 
     fn render_chapters_area(&mut self, area: Rect, buf: &mut Buffer) {
-        let layout = Layout::vertical([Constraint::Percentage(10), Constraint::Percentage(90)]).margin(2);
+        let layout = Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).margin(1);
 
         let [sorting_buttons_area, chapters_area] = layout.areas(area);
 
@@ -315,7 +315,7 @@ where
                 let total = format!("Total chapters {}", chapters.pagination.total_items);
 
                 let mut chapter_instructions = vec![
-                    "Scroll Down/Up ".into(),
+                    "Move ".into(),
                     Span::raw(" <j>/<k> ").style(*INSTRUCTIONS_STYLE),
                     " Download chapter ".into(),
                     Span::raw(" <d> ").style(*INSTRUCTIONS_STYLE),
@@ -325,7 +325,7 @@ where
 
                 if self.picker.is_some() {
                     chapter_instructions.push(" Read chapter ".into());
-                    chapter_instructions.push(Span::raw(" <Enter>/<l> ").style(*INSTRUCTIONS_STYLE));
+                    chapter_instructions.push(Span::raw(" <Enter> ").style(*INSTRUCTIONS_STYLE));
 
                     chapter_instructions.push(" Read bookmark ".into());
                     chapter_instructions.push(Span::raw(" <B> ").style(*INSTRUCTIONS_STYLE));
@@ -372,7 +372,7 @@ where
     }
 
     fn render_sorting_buttons(&mut self, area: Rect, buf: &mut Buffer) {
-        let layout = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)]);
+        let layout = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)]);
         let [sorting_area, language_area] = layout.areas(area);
 
         let order_title = format!("Order: {} ", match self.chapter_filters.order {
@@ -395,7 +395,7 @@ where
                 "Close".into(),
                 Span::raw(" <Esc> ").style(*INSTRUCTIONS_STYLE),
                 "Up/Down".into(),
-                Span::raw(" <k><j> ").style(*INSTRUCTIONS_STYLE),
+                Span::raw(" <k>/<j> ").style(*INSTRUCTIONS_STYLE),
                 "Search ".into(),
                 Span::raw("<Enter>").style(*INSTRUCTIONS_STYLE),
             ]);
@@ -441,10 +441,10 @@ where
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.local_action_tx.send(MangaPageActions::ScrollUpAvailbleLanguages).ok();
                 },
-                KeyCode::Enter | KeyCode::Char('l') => {
+                KeyCode::Enter => {
                     self.local_action_tx.send(MangaPageActions::SearchByLanguage).ok();
                 },
-                KeyCode::Char('h') | KeyCode::Esc => {
+                KeyCode::Esc => {
                     self.local_action_tx.send(MangaPageActions::ToggleAvailableLanguagesList).ok();
                 },
                 _ => {},
@@ -483,7 +483,7 @@ where
                     KeyCode::Char('t') => {
                         self.local_action_tx.send(MangaPageActions::ToggleOrder).ok();
                     },
-                    KeyCode::Char('l') | KeyCode::Enter => {
+                    KeyCode::Enter => {
                         self.local_action_tx.send(MangaPageActions::ReadChapter).ok();
                     },
                     KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
@@ -1111,11 +1111,11 @@ where
     type Actions = MangaPageActions;
 
     fn render(&mut self, area: Rect, frame: &mut Frame<'_>) {
-        let layout = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(15), Constraint::Percentage(85)]);
-
-        let [cover_area, information_area] = layout.areas(area);
+        let [cover_area, information_area] = if area.width >= 100 {
+            Layout::horizontal([Constraint::Length(30), Constraint::Fill(1)]).areas(area)
+        } else {
+            Layout::vertical([Constraint::Length(12), Constraint::Fill(1)]).areas(area)
+        };
 
         self.render_cover(cover_area, frame.buffer_mut());
         self.render_manga_information(information_area, frame);
