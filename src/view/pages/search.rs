@@ -307,7 +307,7 @@ where
                     " Plan to read ".into(),
                     Span::raw("<p>").style(*INSTRUCTIONS_STYLE),
                     " Open ".into(),
-                    Span::raw("<Enter>/<l>").style(*INSTRUCTIONS_STYLE),
+                    Span::raw("<Enter>").style(*INSTRUCTIONS_STYLE),
                 ]);
 
                 let pagination_instructions = Line::from(vec![
@@ -502,7 +502,7 @@ where
                 KeyCode::Char('f') => {
                     self.local_action_tx.send(SearchPageActions::ToggleFilters).ok();
                 },
-                KeyCode::Char('l') | KeyCode::Enter => {
+                KeyCode::Enter => {
                     self.local_action_tx.send(SearchPageActions::SearchMangaPage).ok();
                 },
 

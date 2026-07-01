@@ -515,7 +515,7 @@ where
                 KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
                     self.local_action_tx.send(FeedActions::PreviousPage).ok();
                 },
-                KeyCode::Char('l') | KeyCode::Enter => {
+                KeyCode::Enter => {
                     self.local_action_tx.send(FeedActions::GoToMangaPage).ok();
                 },
                 KeyCode::Char('/') => {

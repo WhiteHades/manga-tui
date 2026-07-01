@@ -202,7 +202,7 @@ impl HistoryWidget {
             " Previous page: ".into(),
             " <C-u> ".bold().fg(Color::Yellow),
             " Open: ".into(),
-            " <Enter>/<l> ".bold().fg(Color::Yellow),
+            " <Enter> ".bold().fg(Color::Yellow),
             " Delete current manga: ".into(),
             " <d> ".bold().fg(Color::Red),
             " Delete all history: ".into(),
