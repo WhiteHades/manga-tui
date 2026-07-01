@@ -6,9 +6,9 @@
 
 - Local-first library view for folders, image folders, CBZ/ZIP, CBR/RAR, and EPUB.
 - Lazy archive indexing: archives are scanned for page names without full extraction, and pages are read when opened.
-- In-app Stats page with library path, manga/chapter/page totals, format counts, and library reload.
+- In-app Stats page with library path, manga/volume/chapter/page totals, format counts, reading counts, bookmarks, downloads, and accumulated reading time.
 - Vim-style navigation across Library, Search, Stats, Manga, and Reader screens.
-- Inline image reader with stable page/status panels and centered page rendering.
+- Inline image reader with a large adaptive page canvas, compact stats panel, and centered aspect-ratio-preserving page rendering.
 - Local downloads to CBZ, EPUB, PDF, or raw images.
 
 ## Install
@@ -45,6 +45,7 @@ Supported inputs:
 - A folder of images: one manga, one chapter.
 - A single `.cbz`, `.zip`, `.cbr`, `.rar`, or `.epub`: one manga, one chapter.
 - A folder of chapter folders or chapter archives: one manga.
+- A manga folder with `Volume 1/Chapter 1` style folders: one manga grouped by volume.
 - A folder of manga folders: one library.
 
 Cover detection:
@@ -74,16 +75,16 @@ Reloading swaps the shared local index and clears stale Library/Search/Manga/Rea
 | Area | Keys |
 | --- | --- |
 | App | `gh` Library, `gs` Search, `gt` Stats, `q` quit |
-| Lists | `j`/`k` move down/up, `Enter`/`l` open |
+| Lists | `j`/`k` or arrows move, `Enter` opens |
 | Search | `/` type, `Enter` search, `Esc` stop typing |
 | Pagination | `Ctrl-d` next page, `Ctrl-u` previous page |
-| Manga page | `Enter`/`l` read, `B` read bookmarked, `m` bookmark, `d` download chapter, `a` download all |
-| Reader | `j`/`l` next page, `k`/`h` previous page, `n` next chapter, `N` previous chapter, `q`/`Backspace` exit |
+| Manga page | `Enter` read, `B` read bookmarked, `m` bookmark, `d` download chapter, `a` download all, `L` languages |
+| Reader | `j`/`Down` next page, `k`/`Up` previous page, `g` first page, `G` last page, `i` toggle stats panel, `n` next chapter, `N` previous chapter, `q`/`Esc`/`Backspace` exit |
 | Confirm dialogs | `y` confirm, `n`/`q`/`Esc` cancel |
 
 ## Image Rendering
 
-Use a terminal with inline image support for the reader. If the terminal does not support inline images, the app still opens and can browse/search/download local manga, but the reader will show an inline-image support error when opening a chapter.
+Use a terminal with inline image support for the reader. If the terminal does not support inline images, the app still opens and can browse/search/download local manga, but the reader will show an inline-image support error when opening a chapter. The reader automatically recalculates its page canvas on terminal resize and preserves each page's aspect ratio; press `i` to hide the stats panel and give the page the full terminal canvas.
 
 ## Configuration
 
